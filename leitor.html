@@ -37,6 +37,10 @@ window.CMTema=(()=>{
 })();
 /* O administrador acede a todas as provas, tal como na gestão: a password dele vale nos leitores e no quadro. */
 window.cmAdminComPassword=(estado,password)=>!!password&&(estado?.utilizadores||[]).some(c=>(c.tipo==='administrador'||(c.user==='admin'&&!c.tipo))&&c.pass===password);
+/* O número entre parênteses é o ano de escolaridade equivalente: «1(10)» é o 1.º ano de um curso profissional, ou seja, o 10.º ano. */
+window.cmAnoEquivalente=ano=>{const m=String(ano??'').match(/\(\s*(\d{1,2})\s*[^)]*\)/),n=m?Number(m[1]):NaN;return n>=1&&n<=12?n:null;};
+/* O prazo das autorizações vale até ao fim do dia escolhido, na hora deste aparelho. */
+window.cmPrazoConsentimentosTerminado=(prova,agora=new Date())=>{const m=String(prova?.prazoConsentimentos||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return !!m&&agora>=new Date(+m[1],+m[2]-1,+m[3]+1);};
 /* Avisos que ficam visíveis até serem resolvidos ou fechados. */
 window.CMAvisos=(()=>{
  function mostrar(id,texto){

@@ -195,6 +195,94 @@ function cmProgresso(texto){
 let cmPesquisaTimer=0;
 function cmPesquisaAdiada(){clearTimeout(cmPesquisaTimer);cmPesquisaTimer=setTimeout(()=>window.atualizarTabelaParticipantes?.(),180);}
 
+// ---------- Ciclos com prova obrigatória e prazo das autorizações ----------
+function cmCiclosProvaObrigatoria(prova=currentProva){return Array.isArray(prova?.ciclosProvaObrigatoria)?prova.ciclosProvaObrigatoria:[];}
+function cmProvaObrigatoriaPara(aluno,prova=currentProva){return cmCiclosProvaObrigatoria(prova).includes(cicloDoAluno(aluno));}
+function cmDescricaoProvaObrigatoria(prova=currentProva){
+ const ciclos=cmCiclosProvaObrigatoria(prova),comAlunos=new Set((prova?.participantes||[]).map(a=>cicloDoAluno(a)));
+ return CICLOS_ESCOLARES.filter(c=>ciclos.includes(c.id)&&comAlunos.has(c.id)).map(c=>c.nome).join(', ');
+}
+// O registo que está em vigor: o que foi limpo depois de gravado já não conta (mesma regra de CMConsentimento.aplicar).
+function cmRegistoConsentimentoVigente(prova,chave){
+ const reg=prova.consentimentos?.[chave],limpeza=prova.consentimentosLimpos?.[chave];
+ return limpeza&&(reg?.limpeza!==limpeza.operacao||Number(limpeza.revisao)>=Number(reg?.revisao||0))?null:reg||null;
+}
+// Quantos alunos estão, ou ficariam, com registo automático. Não altera nada.
+function cmPrevisaoPrazo(prova=currentProva){
+ const r={sim:0,nao:0};
+ for(const a of prova?.participantes||[]){
+  if(!alunoEmCicloObrigatorio(a,prova))continue;
+  const reg=a.consentimentoId?cmRegistoConsentimentoVigente(prova,a.consentimentoId):null;
+  if(reg&&!reg.automaticoPrazo)continue;
+  if(cmProvaObrigatoriaPara(a,prova))r.sim++;else r.nao++;
+ }
+ return r;
+}
+// Aplica o prazo a uma prova. Só toca em registos automáticos: uma resposta lida nunca muda.
+// Se o prazo deixar de estar terminado, ou o ciclo deixar de participar, o aluno volta a «por receber».
+function cmAplicarPrazoNaProva(prova,agora=new Date()){
+ const terminou=cmPrazoConsentimentosTerminado(prova,agora),em=Date.now(),res={mudou:false,sim:0,nao:0,repostos:0};
+ if(terminou&&CMConsentimento.garantirIds(prova))res.mudou=true;
+ for(const a of prova.participantes||[]){
+  const chave=a.consentimentoId;if(!chave)continue;
+  const reg=cmRegistoConsentimentoVigente(prova,chave);
+  if(reg&&!reg.automaticoPrazo)continue;
+  if(!terminou||!alunoEmCicloObrigatorio(a,prova)){
+   if(reg){
+    const limpezas=prova.consentimentosLimpos||(prova.consentimentosLimpos={});
+    limpezas[chave]={revisao:Math.max(Number(reg.revisao)||0,Number(limpezas[chave]?.revisao)||0)+1,operacao:'prazo',em,por:'prazo',ativoRestaurado:reg.ativoAntes!==false};
+    delete prova.consentimentos[chave];res.repostos++;res.mudou=true;
+   }
+   continue;
+  }
+  const resposta=cmProvaObrigatoriaPara(a,prova)?'SIM':'NAO';
+  if(reg?.resposta===resposta)continue;
+  const antigo=prova.consentimentos?.[chave],limpeza=prova.consentimentosLimpos?.[chave],ativoAntes=a.desativadoPorConsentimento&&antigo?antigo.ativoAntes:a.ativo!==false;
+  if(!prova.consentimentos)prova.consentimentos={};
+  prova.consentimentos[chave]={resposta,motivo:resposta==='NAO'?'Não entregou até ao prazo':'',revisao:Math.max(Number(antigo?.revisao)||0,Number(limpeza?.revisao)||0)+1,registadoEm:em,operador:'prazo',operacao:'prazo',ativoAntes,automaticoPrazo:true,...(reg?.leituraAberta?{leituraAberta:true}:{}),...(limpeza?{limpeza:limpeza.operacao}:{})};
+  if(resposta==='SIM')res.sim++;else res.nao++;
+  res.mudou=true;
+ }
+ if(res.mudou)CMConsentimento.aplicar(prova);
+ return res;
+}
+let cmUltimaAvaliacaoPrazo=0,cmAvaliacaoPrazoOcupada=false;
+function cmAvaliarPrazoConsentimentos(forcar=false){
+ if(cmAvaliacaoPrazoOcupada||(!forcar&&Date.now()-cmUltimaAvaliacaoPrazo<3000))return;
+ // Com a nuvem disponível, espera pelos dados mais recentes para não marcar quem já respondeu noutro aparelho.
+ if(typeof firebase!=='undefined'&&!window.cmNuvemConfirmada)return;
+ if(sessionStorage.getItem('cortaMatoLogado')!=='true')return;
+ cmUltimaAvaliacaoPrazo=Date.now();cmAvaliacaoPrazoOcupada=true;
+ try{
+  let sim=0,nao=0,mudou=false;const nomes=[];
+  for(const p of appState.provas||[]){
+   if(p.deleted||!podeAcederProva(p))continue;
+   if(!p.prazoConsentimentos&&!Object.values(p.consentimentos||{}).some(r=>r?.automaticoPrazo))continue;
+   const r=cmAplicarPrazoNaProva(p);if(!r.mudou)continue;
+   mudou=true;sim+=r.sim;nao+=r.nao;if(r.sim+r.nao)nomes.push(p.nome);registarAlteracaoParticipantesCSV(p);
+  }
+  if(!mudou)return;
+  saveState(true);if(currentProva)atualizarTabelaParticipantes();
+  if(sim+nao)CMAvisos.mostrar('cm-aviso-prazo','Prazo das autorizações terminado em '+nomes.join(', ')+': '+sim+' SIM e '+nao+' NÃO registados automaticamente em quem não entregou.');
+ }finally{cmAvaliacaoPrazoOcupada=false;}
+}
+function cmDefinirPrazoConsentimentos(data){
+ if(!assegurarAcessoProva())return false;
+ const p=currentProva,novo=/^\d{4}-\d{2}-\d{2}$/.test(data||'')?data:'';
+ if(data&&!novo)return false;
+ if(cmPrazoConsentimentosTerminado({prazoConsentimentos:novo})){
+  const prev=cmPrevisaoPrazo(p),n=prev.sim+prev.nao;
+  if(n&&!confirm('Este prazo já terminou. Ao guardar, '+n+(n===1?' aluno':' alunos')+' sem resposta ficam registados já: '+prev.sim+' SIM e '+prev.nao+' NÃO.\n\nPode desfazer depois, escolhendo uma data futura ou removendo o prazo.'))return false;
+ }else{
+  const n=Object.values(p.consentimentos||{}).filter(r=>r?.automaticoPrazo).length;
+  if(n&&!confirm('Com este prazo, '+n+(n===1?' registo automático volta':' registos automáticos voltam')+' a «por receber». As respostas lidas não mudam.'))return false;
+ }
+ if(novo)p.prazoConsentimentos=novo;else delete p.prazoConsentimentos;
+ saveState(true);cmAvaliarPrazoConsentimentos(true);atualizarAreaConsentimentos();
+ return true;
+}
+setInterval(()=>cmAvaliarPrazoConsentimentos(),60000);
+
 // ---------- Acessibilidade ----------
 function cmEtiquetarCampos(){
  const nomes={'csv-file':'Ficheiro CSV dos alunos','import-backup-file':'Ficheiro da cópia de segurança','import-backup-file-modal':'Ficheiro da cópia de segurança','provas-dropdown':'Prova','provas-dropdown-interno':'Prova','search-participantes':'Procurar aluno','filter-ano':'Filtrar por ano','filter-turma':'Filtrar por turma','manual-proc':'Número do dorsal','search-resultados':'Procurar na classificação','voltas-adaptada':'Voltas da Prova Adaptada'};
@@ -485,7 +573,7 @@ window.CMDocs=(()=>{
   consent(mudou){
    const p=currentProva,lista=()=>ordenarAlunosDistribuicaoDorsais(p.participantes||[]).filter(a=>alunoEmCicloObrigatorio(a));
    const q=campoLista('Quais?',[['PENDENTE','Só as que ainda não voltaram'],['','Todas']],mudou),t=campoLista('Turma',[['','Todas as turmas'],...turmasDe(lista())],mudou);
-   const escolhidos=()=>lista().filter(a=>(!q.s.value||(a.consentimento?.resposta||'PENDENTE')===q.s.value)&&(!t.s.value||turmaTxt(a.ano,a.turma)===t.s.value));
+   const escolhidos=()=>lista().filter(a=>(!q.s.value||respostaConsentimentoEfetiva(a)===q.s.value)&&(!t.s.value||turmaTxt(a.ano,a.turma)===t.s.value));
    return {campos:[q.no,t.no],resumo:()=>plural(escolhidos().length,'autorização','autorizações'),vazio:()=>!escolhidos().length,imprimir(){const par=t.s.value?lista().find(a=>turmaTxt(a.ano,a.turma)===t.s.value):null;window.CMPercurso.imprimirEmFalta(par?String(par.ano||''):'',par?String(par.turma||''):'',q.s.value);}};
   },
   dorsal(mudou){
@@ -1618,6 +1706,10 @@ window.CMTema=(()=>{
 })();
 /* O administrador acede a todas as provas, tal como na gestão: a password dele vale nos leitores e no quadro. */
 window.cmAdminComPassword=(estado,password)=>!!password&&(estado?.utilizadores||[]).some(c=>(c.tipo==='administrador'||(c.user==='admin'&&!c.tipo))&&c.pass===password);
+/* O número entre parênteses é o ano de escolaridade equivalente: «1(10)» é o 1.º ano de um curso profissional, ou seja, o 10.º ano. */
+window.cmAnoEquivalente=ano=>{const m=String(ano??'').match(/\(\s*(\d{1,2})\s*[^)]*\)/),n=m?Number(m[1]):NaN;return n>=1&&n<=12?n:null;};
+/* O prazo das autorizações vale até ao fim do dia escolhido, na hora deste aparelho. */
+window.cmPrazoConsentimentosTerminado=(prova,agora=new Date())=>{const m=String(prova?.prazoConsentimentos||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return !!m&&agora>=new Date(+m[1],+m[2]-1,+m[3]+1);};
 /* Avisos que ficam visíveis até serem resolvidos ou fechados. */
 window.CMAvisos=(()=>{
  function mostrar(id,texto){
@@ -4962,16 +5054,29 @@ const CMTextoConsentimento=(()=>{
  .cmp-vazio p{color:var(--c-muted);margin:0 0 18px}
 
  /* Ciclos com prova obrigatória */
- .cmp-ciclos-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:0 0 16px}
- .cmp-ciclo{position:relative;display:flex!important;flex-direction:column;gap:2px;padding:16px 16px 14px 52px!important;border:2px solid var(--c-line)!important;border-radius:18px;background:#fff;cursor:pointer;transition:border-color .15s,background .15s,transform .15s;min-height:96px}
- .cmp-ciclo:hover{transform:translateY(-2px)}
- .cmp-ciclo input{position:absolute;left:16px;top:18px;width:22px!important;height:22px!important;margin:0}
+ .cmp-ciclos-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:0 0 16px}
+ .cmp-ciclo{display:flex;flex-direction:column;gap:2px;padding:16px;border:2px solid var(--c-line);border-radius:18px;background:#fff;transition:border-color .15s,background .15s}
+ .cmp-ciclo[hidden]{display:none}
  .cmp-ciclo b{font-size:18px;color:var(--c-ink)}
- .cmp-ciclo span{font-size:14px;color:var(--c-muted);font-weight:500!important}
+ .cmp-ciclo-anos{font-size:14px;color:var(--c-muted);font-weight:500}
  .cmp-ciclo em{font-style:normal;font-size:14px;font-weight:800;color:var(--tone-dk);margin-top:4px}
- .cmp-ciclo:has(input:checked){border-color:var(--tone)!important;background:var(--tone-wash);box-shadow:0 10px 22px -16px var(--tone)}
- .cmp-ciclo:has(input:focus-visible){outline:3px solid var(--c-sun);outline-offset:2px}
+ .cmp-ciclo.participa{border-color:var(--tone);background:var(--tone-wash)}
+ .cmp-ciclo.vazio{border-style:dashed}
  .cmp-ciclo.vazio em{color:var(--c-muted)}
+ .cmp-ciclo.vazio .cmp-ciclo-ops{display:none}
+ .cmp-ciclo-ops{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+ .cmp-ciclo-ops label{flex:1 1 124px;display:flex!important;align-items:center;gap:10px;min-height:44px;padding:8px 12px!important;margin:0!important;border:1.5px solid var(--c-line);border-radius:12px;background:#fff;color:var(--c-ink);font-size:15px;font-weight:700;cursor:pointer}
+ .cmp-ciclo-ops input{flex:none;width:20px!important;height:20px!important;margin:0}
+ .cmp-ciclo-ops label:has(input:checked){border-color:var(--tone);color:var(--tone-dk)}
+ .cmp-ciclo-ops label:has(input:disabled){opacity:.55;cursor:not-allowed}
+ .cmp-ciclo-ops label:has(input:focus-visible){outline:3px solid var(--c-sun);outline-offset:2px}
+ .cmp-prazo-linha{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin:0 0 14px}
+ .cmp-prazo-linha .btn[hidden]{display:none}
+ .cmp-prazo-campo{flex:1 1 220px;max-width:320px}
+ .cmp-prazo-campo label{display:block;margin-bottom:6px;font-weight:700;color:var(--c-ink)}
+ .cmp-prazo-campo input{width:100%;min-height:44px;padding:0 12px}
+ .cmp-prazo-estado{margin:0;padding:12px 16px;border-radius:14px;background:var(--tone-wash);color:var(--tone-dk);font-size:15px;font-weight:700}
+ .cmp-prazo-estado.aviso{background:#fff5d6;color:#5c4400;border:1px solid #f0d27a}
  .cmp-ciclos-resumo{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:16px;font-weight:700;color:#fff;background:var(--tone);border-radius:14px;padding:14px 18px;margin:0 0 16px}
  .cmp-ciclos-resumo.aviso{background:#fff5d6;color:#5c4400;border:1px solid #f0d27a}
  .cmp-ciclos-acoes{display:flex;gap:10px;flex-wrap:wrap}
@@ -5156,9 +5261,9 @@ const CMTextoConsentimento=(()=>{
   body.cmp.visual-gestao .cmp-extra .kpi-val{font-size:24px!important}
   body.cmp.visual-gestao .cmp-extra .kpi-label{font-size:12px!important;line-height:1.25}
   body.cmp :is(.btn-sm,.cockpit-filter-btn),body.cmp.visual-gestao table :is(.btn,button){min-height:44px!important}
-  .cmp-ciclos-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .cmp-ciclo{padding:14px 12px 12px 44px!important}
-  .cmp-ciclo input{left:12px;top:16px}
+  .cmp-ciclos-grid{grid-template-columns:minmax(0,1fr)}
+  .cmp-ciclo{padding:14px}
+  .cmp-prazo-campo{max-width:none;flex-basis:100%}
   .cmp-qr-img{width:132px;height:132px}
   body.cmp footer.credit-bar{font-size:11.5px!important;padding:0 8px!important}
   body.cmp .modal-header-hero{padding:18px 18px 16px!important}
@@ -5175,9 +5280,9 @@ const CMTextoConsentimento=(()=>{
   body.cmp.cmp-sem-nav .cmp-percurso{display:none}
  }
  @media(max-width:400px){body.cmp.visual-gestao .cmp-extra.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
- @media(max-width:380px){.cmp-ciclos-grid{grid-template-columns:minmax(0,1fr)!important}.cmp-ciclo{min-height:0}body.cmp .cmp-cab h1{font-size:26px!important}body.cmp{--h-credit:44px}body.cmp footer.credit-bar{display:block!important;white-space:normal;line-height:16px!important;font-size:11.5px!important;padding:5px 10px!important}body.cmp footer.credit-bar .credit-sep{margin:0 4px}.cmp-rot{font-size:10.5px;letter-spacing:-.02em}}
+ @media(max-width:380px){body.cmp .cmp-cab h1{font-size:26px!important}body.cmp{--h-credit:44px}body.cmp footer.credit-bar{display:block!important;white-space:normal;line-height:16px!important;font-size:11.5px!important;padding:5px 10px!important}body.cmp footer.credit-bar .credit-sep{margin:0 4px}.cmp-rot{font-size:10.5px;letter-spacing:-.02em}}
  body.cmp.cmp-sem-nav .cmp-percurso{visibility:hidden}
- @media(prefers-reduced-motion:reduce){.cmp-passo,.cmp-toast{animation:none}.cmp-percurso button[aria-current=step] .cmp-ponto,.cmp-ciclo:hover{transform:none}}
+ @media(prefers-reduced-motion:reduce){.cmp-passo,.cmp-toast{animation:none}.cmp-percurso button[aria-current=step] .cmp-ponto{transform:none}}
 
  /* Tipos de letra nos editores: procurar, escrever o nome e pedir a lista completa */
  .cm-fontes{display:grid;gap:8px;min-width:0}
@@ -5574,7 +5679,7 @@ const CMTextoConsentimento=(()=>{
   <div class="consent-toolbar">
    <div><label for="consent-ano">Ano</label><select id="consent-ano" onchange="atualizarAreaConsentimentos()"><option value="">Todos os anos</option></select></div>
    <div><label for="consent-turma">Turma</label><select id="consent-turma" onchange="atualizarAreaConsentimentos()"><option value="">Todas as turmas</option></select></div>
-   <div><label for="consent-estado">Resposta</label><select id="consent-estado" onchange="atualizarAreaConsentimentos()"><option value="">Todas</option><option value="PENDENTE">Por receber</option><option value="SIM">SIM</option><option value="REATIVADO">SIM — reativado pelo administrador</option><option value="NAO">NÃO</option></select></div>
+   <div><label for="consent-estado">Resposta</label><select id="consent-estado" onchange="atualizarAreaConsentimentos()"><option value="">Todas</option><option value="PENDENTE">Por receber</option><option value="SIM">SIM</option><option value="REATIVADO">SIM — reativado pelo administrador</option><option value="NAO">NÃO</option><option value="AUTOMATICO">Registado pelo prazo</option></select></div>
    <div><label for="consent-pesquisa">Aluno / processo</label><input id="consent-pesquisa" placeholder="Pesquisar…" oninput="atualizarAreaConsentimentos()"></div>
   </div>
   <div class="consent-actions"><button type="button" class="btn btn-primary" onclick="imprimirConsentimentos()">🖨️ Imprimir documentos da lista</button><a class="btn btn-secondary" id="consent-abrir-leitor" href="consentimentos.html" target="_blank" rel="noopener" onclick="if(!assegurarAcessoProva())return false;this.href='consentimentos.html?prova='+encodeURIComponent(currentProva.id)">📷 Abrir leitor de consentimentos</a><button type="button" class="btn btn-danger" id="consent-limpar-abrir" onclick="abrirLimpezaConsentimentos()">Limpar registos de autorizações</button></div>
@@ -5806,7 +5911,7 @@ const CMTextoConsentimento=(()=>{
                         <select id="filter-turma" onchange="atualizarTabelaParticipantes()" style="height: 38px; padding: 0 10px; font-size: 13px;">
                             <option value="">Todas as Turmas</option>
                         </select>
-                        <select id="filter-consentimento" aria-label="Filtrar alunos por autorização" onchange="atualizarTabelaParticipantes()" style="height:38px;padding:0 10px;font-size:13px"><option value="">Todas as autorizações</option><option value="SIM">SIM — autorizado</option><option value="REATIVADO">SIM — reativado pelo administrador</option><option value="NAO">NÃO — não autorizado</option><option value="PENDENTE">Por receber</option></select>
+                        <select id="filter-consentimento" aria-label="Filtrar alunos por autorização" onchange="atualizarTabelaParticipantes()" style="height:38px;padding:0 10px;font-size:13px"><option value="">Todas as autorizações</option><option value="SIM">SIM — autorizado</option><option value="REATIVADO">SIM — reativado pelo administrador</option><option value="AUTOMATICO">Registado pelo prazo</option><option value="NAO">NÃO — não autorizado</option><option value="PENDENTE">Por receber</option></select>
                     </div>
                 </div>
                 <div class="table-container">
@@ -10965,7 +11070,7 @@ function ativarListenersFirestore(db){
             }
             if(confirmado && alteracoesParticipantesPendentesCSV.size && !envioNuvemEmCursoCSV && !ultimoErroEnvioCSV)enviarEstadoParaNuvem();
         } else if(confirmado && appState.provas?.length && !envioNuvemEmCursoCSV && !ultimoErroEnvioCSV)enviarEstadoParaNuvem();
-        mostrarEstadoNuvemCSV(confirmado);
+        mostrarEstadoNuvemCSV(confirmado);if(confirmado){window.cmNuvemConfirmada=true;setTimeout(()=>cmAvaliarPrazoConsentimentos(true),0);}
     },error=>{
         ultimoErroEnvioCSV=error.code==='permission-denied'?'Permissão Negada':'Ligação Instável';mostrarEstadoNuvemCSV();
     });
@@ -11062,7 +11167,7 @@ const CMConsentimento=(()=>{
    const registos={...(p.consentimentos || {})};
    const vigente=(chave,reg)=>!limpezas[chave] || reg?.limpeza===limpezas[chave].operacao && Number(reg.revisao)>Number(limpezas[chave].revisao);
    for(const [chave,reg] of Object.entries(registos))if(!vigente(chave,reg))delete registos[chave];
-   for(const [chave,reg] of Object.entries(remoto?.consentimentos || {}))if(vigente(chave,reg) && (!registos[chave] || Number(reg.revisao)>Number(registos[chave].revisao)))registos[chave]={...reg};
+   for(const [chave,reg] of Object.entries(remoto?.consentimentos || {}))if(vigente(chave,reg) && (!registos[chave] || (!reg.automaticoPrazo!==!registos[chave].automaticoPrazo?!reg.automaticoPrazo:Number(reg.revisao)>Number(registos[chave].revisao))))registos[chave]={...reg};
    if(p.consentimentos || remoto?.consentimentos || Object.keys(limpezas).length)p.consentimentos=registos;
    aplicar(p);
   }
@@ -11107,7 +11212,7 @@ const CMConsentimento=(()=>{
    const ativoRestaurado=aluno?.desativadoPorConsentimento?(reg?.reativacaoGestao?reg.reativacaoGestao.ativo:reg?.ativoAntes!==false):aluno?.ativo!==false;
    limpezas[chave]={revisao:Math.max(Number(reg?.revisao)||0,Number(limpezas[chave]?.revisao)||0)+1,operacao,em,por:String(operador || ''),ativoRestaurado};
   }
-  prova.consentimentosLimpos=limpezas;prova.consentimentos={};aplicar(prova);return prova;
+  prova.consentimentosLimpos=limpezas;prova.consentimentos={};delete prova.prazoConsentimentos;aplicar(prova);return prova;
  }
  async function hashPassword(password,sal){
   if(!globalThis.crypto?.subtle)throw Error('Abra a plataforma por HTTPS para definir ou validar a password do leitor.');
@@ -11199,14 +11304,15 @@ let consentTextoProva=null,limpezaConsentimentosProvaId='',limpezaConsentimentos
 function escaparConsentimento(valor){return String(valor ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function textoConsentimentoPredefinido(){const data=currentProva?.dataProva?new Date(currentProva.dataProva+'T12:00:00').toLocaleDateString('pt-PT',{day:'numeric',month:'long',year:'numeric'}):'data a indicar';return 'A Área Disciplinar de Educação Física informa que, de acordo com o Plano Anual de Atividades, o Corta-Mato Escolar será realizado no dia '+data+', das 08h30 às 13h20, no Parque de Nossa Senhora das Dores.\n\nOs alunos deverão comparecer nas respetivas escolas às 08h30, para a chamada e o levantamento dos dorsais, dirigindo-se depois para os locais previamente definidos.\n\nTodos os alunos deverão trazer equipamento desportivo adequado às condições climatéricas e não devem trazer objetos de valor (telemóveis, carteira, etc.). Após a prova, será oferecido um suplemento alimentar a cada aluno participante. Os alunos que tenham atividades de tarde na escola podem utilizar os balneários para banhos.';}
 function textoConsentimentoAtual(){return currentProva?.consentTextoPredefinido?textoConsentimentoPredefinido():currentProva?.textoConsentimento || textoConsentimentoPredefinido();}
-// Ciclos de ensino. A prova pode ser obrigatória só para alguns: as autorizações (lista, impressão e
-// contagem) seguem essa escolha. Sem escolha guardada, contam todos os alunos, como antes.
+// Ciclos de ensino. «ciclosObrigatorios» guarda os ciclos que PARTICIPAM (o nome mantém-se para os dados já
+// gravados continuarem válidos): as autorizações (lista, impressão e contagem) seguem essa escolha. Sem escolha
+// guardada, contam todos os alunos, como antes. «ciclosProvaObrigatoria» guarda em quais deles a prova é obrigatória.
 const CICLOS_ESCOLARES=[{id:'c1',nome:'1.º ciclo',anos:'1.º ao 4.º ano',min:1,max:4},{id:'c2',nome:'2.º ciclo',anos:'5.º e 6.º ano',min:5,max:6},{id:'c3',nome:'3.º ciclo',anos:'7.º ao 9.º ano',min:7,max:9},{id:'sec',nome:'Secundário',anos:'10.º ao 12.º ano',min:10,max:12},{id:'sem',nome:'Sem ano escolar',anos:'CEF, PIEF ou ano em falta',min:0,max:-1}];
-function cicloDoAluno(aluno){if(/\b(cef|pief|pca|efa|prof)/i.test(String(aluno?.ano??'')))return 'sem';const ano=dadosEscolaridadeTurmaDorsais(aluno).ano;return (CICLOS_ESCOLARES.find(c=>ano!==null&&ano>=c.min&&ano<=c.max)||{id:'sem'}).id;}
+function cicloDoAluno(aluno){const equivalente=cmAnoEquivalente(aluno?.ano);if(equivalente===null&&/\b(cef|pief|pca|efa|prof)/i.test(String(aluno?.ano??'')))return 'sem';const ano=equivalente??dadosEscolaridadeTurmaDorsais(aluno).ano;return (CICLOS_ESCOLARES.find(c=>ano!==null&&ano>=c.min&&ano<=c.max)||{id:'sem'}).id;}
 function ciclosObrigatoriosProva(prova=currentProva){return Array.isArray(prova?.ciclosObrigatorios)?prova.ciclosObrigatorios:null;}
 function alunoEmCicloObrigatorio(aluno,prova=currentProva){const ciclos=ciclosObrigatoriosProva(prova);return !ciclos || ciclos.includes(cicloDoAluno(aluno));}
-function descricaoCiclosObrigatorios(prova=currentProva){const ciclos=ciclosObrigatoriosProva(prova);if(!ciclos)return '';if(!ciclos.length)return 'Nenhum ciclo selecionado';return 'Ciclos: '+CICLOS_ESCOLARES.filter(c=>ciclos.includes(c.id)).map(c=>c.nome).join(', ');}
-function definirCiclosObrigatorios(ciclos){if(!assegurarAcessoProva())return;currentProva.ciclosObrigatorios=CICLOS_ESCOLARES.map(c=>c.id).filter(id=>ciclos.includes(id));saveState(true);atualizarAreaConsentimentos();}
+function descricaoCiclosObrigatorios(prova=currentProva){const ciclos=ciclosObrigatoriosProva(prova);if(!ciclos)return '';const comAlunos=new Set((prova?.participantes||[]).map(a=>cicloDoAluno(a))),lista=CICLOS_ESCOLARES.filter(c=>ciclos.includes(c.id)&&comAlunos.has(c.id));if(!lista.length)return 'Nenhum ciclo selecionado';return 'Ciclos: '+lista.map(c=>c.nome).join(', ');}
+function definirCiclosObrigatorios(ciclos,obrigatorios=cmCiclosProvaObrigatoria()){if(!assegurarAcessoProva())return;const ordem=CICLOS_ESCOLARES.map(c=>c.id);currentProva.ciclosObrigatorios=ordem.filter(id=>ciclos.includes(id));currentProva.ciclosProvaObrigatoria=ordem.filter(id=>ciclos.includes(id)&&obrigatorios.includes(id));saveState(true);cmAvaliarPrazoConsentimentos(true);atualizarAreaConsentimentos();}
 function alunosConsentimentosFiltrados(){
  const valor=id=>document.getElementById(id)?.value || '',ano=valor('consent-ano'),turma=valor('consent-turma'),estado=valor('consent-estado'),pesquisa=valor('consent-pesquisa').trim().toLocaleLowerCase('pt');
  return ordenarAlunosDistribuicaoDorsais(currentProva?.participantes || []).filter(a=>alunoEmCicloObrigatorio(a)&&(!ano || String(a.ano)===ano)&&(!turma || String(a.turma)===turma)&&(!estado || consentimentoNoFiltro(a,estado))&&(!pesquisa || (a.nome+' '+a.processo).toLocaleLowerCase('pt').includes(pesquisa)));
@@ -11230,8 +11336,8 @@ function atualizarAreaConsentimentos(){
   const valores=[...new Set((currentProva.participantes || []).filter(a=>alunoEmCicloObrigatorio(a)).map(a=>String(a[campo] || '')).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt',{numeric:true,sensitivity:'base'}));
   select.innerHTML='<option value="">'+label+'</option>'+valores.map(v=>'<option value="'+escaparConsentimento(v)+'">'+escaparConsentimento(v)+'</option>').join('');select.value=valores.includes(anterior)?anterior:'';
  }
- const alunos=alunosConsentimentosFiltrados(),todos=(currentProva.participantes || []).filter(a=>alunoEmCicloObrigatorio(a)),sim=todos.filter(a=>respostaConsentimentoEfetiva(a)==='SIM').length,nao=todos.filter(a=>respostaConsentimentoEfetiva(a)==='NAO').length,reativados=todos.filter(a=>consentimentoReativado(a)).length;
- document.getElementById('consent-resumo').textContent=(descricaoCiclosObrigatorios()?descricaoCiclosObrigatorios()+' · ':'')+alunos.length+' aluno(s) na lista · '+sim+' SIM'+(reativados?' (inclui '+reativados+(reativados===1?' reativado':' reativados')+' pelo administrador)':'')+' · '+nao+' NÃO · '+(todos.length-sim-nao)+' por receber.';
+ const alunos=alunosConsentimentosFiltrados(),todos=(currentProva.participantes || []).filter(a=>alunoEmCicloObrigatorio(a)),sim=todos.filter(a=>respostaConsentimentoEfetiva(a)==='SIM').length,nao=todos.filter(a=>respostaConsentimentoEfetiva(a)==='NAO').length,reativados=todos.filter(a=>consentimentoReativado(a)).length,automaticos=todos.filter(a=>a.consentimento?.automaticoPrazo===true).length;
+ document.getElementById('consent-resumo').textContent=(descricaoCiclosObrigatorios()?descricaoCiclosObrigatorios()+' · ':'')+alunos.length+' aluno(s) na lista · '+sim+' SIM'+(reativados?' (inclui '+reativados+(reativados===1?' reativado':' reativados')+' pelo administrador)':'')+' · '+nao+' NÃO · '+(automaticos?automaticos+(automaticos===1?' registado':' registados')+' pelo prazo · ':'')+(todos.length-sim-nao)+' por receber.';
  corpo.innerHTML=alunos.length?alunos.map(a=>{
   const resposta=a.consentimento?.resposta,idx=currentProva.participantes.indexOf(a);
   return '<tr><td>'+escaparConsentimento(a.processo)+'</td><td>'+escaparConsentimento(a.nome)+identificacaoVoluntarioHTML(a)+'</td><td>'+escaparConsentimento([a.ano,a.turma].filter(Boolean).join(' / '))+'</td><td>'+estadoConsentimentoHTML(a)+motivoConsentimentoHTML(a)+(a.consentimento?.leituraAberta?'<span class="consent-hint"> · Nova leitura permitida</span>':'')+'</td><td><div class="consent-actions"><button type="button" class="btn btn-secondary btn-sm" onclick="imprimirConsentimentos('+idx+')">Imprimir</button>'+(['SIM','NAO'].includes(resposta)&&!a.consentimento.leituraAberta?'<button type="button" class="btn btn-secondary btn-sm" onclick="reabrirConsentimentoAluno('+idx+')">Permitir nova leitura</button>':'')+'</div></td></tr>';
@@ -11255,19 +11361,19 @@ function reabrirConsentimentoAluno(indice){
 }
 function consentimentoReativado(a){const r=a?.consentimento;return r?.resposta==='NAO'&&r.reativacaoGestao?.ativo===true;}
 function respostaConsentimentoEfetiva(a){const r=a?.consentimento?.resposta;return r==='SIM'||consentimentoReativado(a)?'SIM':r==='NAO'?'NAO':'PENDENTE';}
-function consentimentoNoFiltro(a,filtro){return filtro==='REATIVADO'?consentimentoReativado(a):respostaConsentimentoEfetiva(a)===filtro;}
+function consentimentoNoFiltro(a,filtro){return filtro==='REATIVADO'?consentimentoReativado(a):filtro==='AUTOMATICO'?a?.consentimento?.automaticoPrazo===true:respostaConsentimentoEfetiva(a)===filtro;}
 function estadoConsentimentoHTML(aluno){
  const reg=aluno.consentimento;if(!['SIM','NAO'].includes(reg?.resposta))return '';
- const reativado=consentimentoReativado(aluno),sim=reg.resposta==='SIM'||reativado,descricao=reativado?'SIM: reativado pelo administrador da prova':sim?'Consentimento autorizado':'Sem consentimento';
- return '<span class="consent-status '+(sim?'sim':'nao')+'" role="img" aria-label="'+descricao+'" title="'+descricao+'"><span class="consent-symbol" aria-hidden="true">'+(sim?'✓':'✕')+'</span></span>'+(reativado?'<span class="consent-reactivated">Reativado pelo administrador</span>':'');
+ const reativado=consentimentoReativado(aluno),automatico=reg.automaticoPrazo===true,sim=reg.resposta==='SIM'||reativado,descricao=reativado?'SIM: reativado pelo administrador da prova':automatico?(sim?'SIM automático: não entregou até ao prazo, prova obrigatória':'NÃO automático: não entregou até ao prazo'):sim?'Consentimento autorizado':'Sem consentimento';
+ return '<span class="consent-status '+(sim?'sim':'nao')+'" role="img" aria-label="'+descricao+'" title="'+descricao+'"><span class="consent-symbol" aria-hidden="true">'+(sim?'✓':'✕')+'</span></span>'+(reativado?'<span class="consent-reactivated">Reativado pelo administrador</span>':automatico?'<span class="consent-reactivated">Automático: fim do prazo</span>':'');
 }
 function identificacaoVoluntarioHTML(aluno){return aluno.voluntario?'<span class="voluntario-badge" role="img" aria-label="Voluntário" title="Voluntário"><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 3 3 6l3 5 2-1v11h8V10l2 1 3-5-5-3h-2a2 2 0 0 1-4 0H8Z"/></svg></span>':'';}
 function identificacaoParticipanteHTML(aluno){const icones=identificacaoVoluntarioHTML(aluno)+estadoConsentimentoHTML(aluno);return '<span class="participant-name-text">'+escaparConsentimento(aluno.nome)+'</span>'+(icones?'<span class="participant-flags">'+icones+'</span>':'')+motivoConsentimentoHTML(aluno);}
-function motivoConsentimentoHTML(aluno){return aluno.consentimento?.resposta==='NAO'?(consentimentoReativado(aluno)?'<span class="consent-reason consent-reason-antes">Tinha respondido NÃO. Motivo: ':'<span class="consent-reason">Motivo: ')+escaparConsentimento(aluno.consentimento.motivo)+'</span>':'';}
+function motivoConsentimentoHTML(aluno){return aluno.consentimento?.resposta==='NAO'?(consentimentoReativado(aluno)?'<span class="consent-reason consent-reason-antes">'+(aluno.consentimento.automaticoPrazo?'Tinha ficado com NÃO. Motivo: ':'Tinha respondido NÃO. Motivo: '):'<span class="consent-reason">Motivo: ')+escaparConsentimento(aluno.consentimento.motivo)+'</span>':'';}
 function confirmarReativacaoConsentimento(indice){
  const aluno=currentProva?.participantes?.[indice];if(!aluno || aluno.consentimento?.resposta!=='NAO')return true;
  const ativo=aluno.ativo===false;
- if(ativo && !confirm('Este aluno respondeu NÃO. Pretende reativar '+aluno.nome+' sem uma nova leitura? Passa a contar como SIM, identificado como reativado pelo administrador. O NÃO e o motivo ficam registados.'))return false;
+ if(ativo && !confirm((aluno.consentimento.automaticoPrazo?'Este aluno ficou com NÃO por não ter entregue a autorização até ao prazo.':'Este aluno respondeu NÃO.')+' Pretende reativar '+aluno.nome+' sem uma nova leitura? Passa a contar como SIM, identificado como reativado pelo administrador. O NÃO e o motivo ficam registados.'))return false;
  CMConsentimento.definirAtivoGestao(currentProva,aluno.consentimentoId,ativo,obterUtilizadorAtual());return true;
 }
 function abrirLimpezaConsentimentos(){
@@ -12597,7 +12703,7 @@ window.CMPercurso=(()=>{
    dicas:['Defina primeiro os logótipos, a cor e a letra comuns: entram sozinhos nas listas e nos relatórios.','Em Personalizar, cada documento abre no mesmo editor: arraste, mude letras e cores e guarde modelos para outras provas.','O botão Imprimir fica disponível assim que houver dados. Pode escolher turma ou escalão, para reimprimir só o que falta.']},
   {id:'dorsais',titulo:'Alunos',longo:'Alunos e dorsais',cor:'#1d5fd1',cor2:'#2a6fe0',escura:'#15479f',icone:'users',desc:'Inscreva os alunos, confirme a lista e numere os dorsais.',acao:['Adicionar aluno',()=>{abrirEtapa('dorsais','inscrever');setTimeout(()=>$('#man-nome')?.focus(),80);}],noPasso:'inscrever',
    dicas:['No Excel, guarde a pauta como «CSV UTF-8» e importe-a aqui.','Confirme a lista: um aluno sem escalão não entra em nenhuma corrida.','Inscrições tardias recebem o número seguinte, sem mudar os dorsais já impressos.']},
-  {id:'consentimentos',titulo:'Autorizações',longo:'Autorizações das famílias',cor:'#6a3fd0',cor2:'#8456e6',escura:'#5030a3',icone:'document',desc:'Escolha os ciclos, acompanhe quem já respondeu e registe as respostas com o leitor.',acao:['Imprimir autorizações',()=>window.CMDocs?.abrirImpressao('consent')],
+  {id:'consentimentos',titulo:'Autorizações',longo:'Autorizações das famílias',cor:'#6a3fd0',cor2:'#8456e6',escura:'#5030a3',icone:'document',desc:'Escolha os ciclos e o prazo, acompanhe quem já respondeu e registe as respostas com o leitor.',acao:['Imprimir autorizações',()=>window.CMDocs?.abrirImpressao('consent')],
    dicas:['Escolha os ciclos em que a prova é obrigatória: só esses alunos recebem autorização.','Cada documento tem um QR: o leitor no telemóvel reconhece a resposta SIM ou NÃO.','Se um aluno perder o papel, reimprima só as que faltam na turma dele.']},
   {id:'cronometragem',titulo:'Dia da prova',longo:'Dia da prova',cor:'#c93a1f',cor2:'#d33f1c',escura:'#9e2c16',icone:'timer',desc:'Dê a partida a cada escalão, registe as chegadas e acompanhe a classificação.',acao:['Abrir quadro ao vivo',()=>$('.cmp-live')?.click()],
    dicas:['Imprima os dorsais em Documentos depois das autorizações: os alunos com NÃO ficam de fora.','Carregue em «Iniciar partida» quando cada escalão parte e registe as chegadas pelo dorsal ou com o leitor no telemóvel.','O quadro ao vivo mostra pódios e tempos em tempo real, num projetor ou televisão.']}
@@ -12616,7 +12722,7 @@ window.CMPercurso=(()=>{
    {et:'documentos',t:'Preparar os documentos',d:'Logótipos, cor, letra e desenho de cada documento. Pode mudar sempre que quiser.',feito:!!e?.imp.documentos,acao:['Abrir',()=>abrirEtapa('documentos')]},
    {et:'dorsais',t:'Inscrever os alunos',d:!a?'Importe o ficheiro das turmas ou adicione um a um.':plural(a,'aluno inscrito','alunos inscritos')+(e.semCorrida.length?' · atenção: '+plural(e.semCorrida.length,'aluno sem corrida','alunos sem corrida'):''),feito:a>0&&!e.semCorrida.length,acao:e?.semCorrida.length?['Ver quem são',()=>window.cmMostrarSemCorrida()]:['Abrir',()=>abrirEtapa('dorsais','inscrever')]},
    {et:'dorsais',t:'Numerar os dorsais',d:!a?'Depois de inscrever os alunos.':e.semDorsal?plural(e.semDorsal,'aluno sem número','alunos sem número'):'Todos os alunos ativos têm número.',feito:a>0&&!e.semDorsal,acao:['Abrir',()=>abrirEtapa('dorsais','numerar')]},
-   {et:'consentimentos',t:'Escolher os ciclos com prova obrigatória',d:e?.ciclosDefinidos?(typeof descricaoCiclosObrigatorios==='function'?descricaoCiclosObrigatorios(e.p):''):'Só os alunos desses ciclos recebem autorização.',feito:!!e?.ciclosDefinidos,acao:['Escolher',()=>abrirEtapa('consentimentos','ciclos')]},
+   {et:'consentimentos',t:'Escolher os ciclos e o prazo',d:e?.ciclosDefinidos?(typeof descricaoCiclosObrigatorios==='function'?descricaoCiclosObrigatorios(e.p):''):'Só os alunos dos ciclos que participam recebem autorização.',feito:!!e?.ciclosDefinidos,acao:['Escolher',()=>abrirEtapa('consentimentos','ciclos')]},
    {et:'documentos',t:'Imprimir as autorizações',d:semAutorizacoes(e)?'Não se aplica: nenhum ciclo escolhido.':e?plural(e.doCiclo.length,'documento','documentos')+' a imprimir':'Depois de escolher os ciclos.',feito:!!e&&(e.imp.autorizacoes||e.respondidos>0||semAutorizacoes(e)),acao:['Imprimir',()=>window.CMDocs?.abrirImpressao('consent')]},
    {et:'consentimentos',t:'Registar as respostas das famílias',d:semAutorizacoes(e)?'Não se aplica: nenhum ciclo escolhido.':e?.doCiclo.length?e.respondidos+' de '+e.doCiclo.length+' respostas registadas':'Use o leitor quando os documentos voltarem.',feito:!!e&&(e.doCiclo.length>0&&e.respondidos>=e.doCiclo.length||semAutorizacoes(e)),acao:['Abrir leitor',()=>abrirEtapa('consentimentos','leitor')]},
    {et:'documentos',t:'Imprimir os dorsais',d:'Um dorsal A5 por aluno ativo, com o código para a meta.',feito:!!e&&(e.imp.dorsais||e.iniciadas>0),acao:['Imprimir',()=>window.CMDocs?.abrirImpressao('dorsal')]},
@@ -12852,31 +12958,63 @@ window.CMPercurso=(()=>{
   const dig=parseInt($('#digitos-dorsal')?.value)||3,ini=parseInt($('#dorsal-inicial')?.value)||1,n=e?e.alunos.filter(a=>!a.voluntario).length:0,ultimo=ini+n-1,precisa=String(Math.max(ultimo,1)).length;
   av.hidden=!e||precisa<=dig;if(!av.hidden){const t='Com '+n+' alunos, o último dorsal é o '+ultimo+': precisa de '+precisa+' dígitos. Aumente «Dígitos do dorsal» para '+precisa+' para todos os dorsais terem o mesmo tamanho.';if(av.textContent!==t)av.textContent=t;}
  }
- // Ciclos com prova obrigatória: escolhe quem recebe autorização.
+ // Ciclos: quais participam (recebem autorização) e, entre esses, em quais a prova é obrigatória.
  let cartaoCiclos;
  function construirCiclos(){
-  const box=make('div','box cmp-ciclos');box.append(make('h3','','Para que ciclos é obrigatória a prova?'),make('p','cmp-nota','Os alunos dos ciclos escolhidos recebem a autorização para levar a casa. Os restantes não entram na impressão nem na contagem das respostas. Pode mudar a escolha a qualquer momento.'));
-  const grelha=make('div','cmp-ciclos-grid');grelha.setAttribute('role','group');grelha.setAttribute('aria-label','Ciclos com prova obrigatória');
-  for(const c of ciclosDisponiveis()){const l=make('label','cmp-ciclo');l.dataset.ciclo=c.id;const i=make('input');i.type='checkbox';i.value=c.id;l.append(i,make('b','',c.nome),make('span','',c.anos),make('em','','0 alunos'));grelha.append(l);}
+  const box=make('div','box cmp-ciclos');box.append(make('h3','','Que ciclos participam na prova?'),make('p','cmp-nota','Só os alunos dos ciclos que participam recebem autorização e contam nas respostas. Entre esses, marque aqueles em que a prova é obrigatória. Pode mudar a escolha a qualquer momento.'));
+  const grelha=make('div','cmp-ciclos-grid');grelha.setAttribute('role','group');grelha.setAttribute('aria-label','Ciclos que participam e ciclos com prova obrigatória');
+  for(const c of ciclosDisponiveis()){
+   const l=make('div','cmp-ciclo');l.dataset.ciclo=c.id;
+   const opcao=(classe,texto)=>{const r=make('label',classe),i=make('input');i.type='checkbox';i.value=c.id;i.setAttribute('aria-label',texto+': '+c.nome);r.append(i,make('span','',texto));return r;};
+   const ops=make('div','cmp-ciclo-ops');ops.append(opcao('cmp-op-participa','Participa'),opcao('cmp-op-obrigatoria','Obrigatória'));
+   l.append(make('b','',c.nome),make('span','cmp-ciclo-anos',c.anos),make('em','','0 alunos'),ops);grelha.append(l);
+  }
   const resumo=make('p','cmp-ciclos-resumo');resumo.setAttribute('role','status');
   const acoes=make('div','cmp-ciclos-acoes'),guardar=make('button','btn btn-primary','Confirmar ciclos');guardar.type='button';
-  const ler=()=>all('input',grelha).filter(i=>i.checked).map(i=>i.value);
-  grelha.addEventListener('change',()=>{window.definirCiclosObrigatorios?.(ler());agendar();});
-  guardar.addEventListener('click',()=>{window.definirCiclosObrigatorios?.(ler());aviso('Ciclos guardados com sucesso.');irPasso('consentimentos','recolha');});
+  // Um ciclo ainda sem alunos fica a participar: um aluno adicionado mais tarde não desaparece das autorizações sem aviso.
+  const gravar=()=>{window.definirCiclosObrigatorios?.(all('.cmp-op-participa input',grelha).filter(i=>i.checked||i.disabled).map(i=>i.value),all('.cmp-op-obrigatoria input',grelha).filter(i=>i.checked&&!i.disabled).map(i=>i.value));agendar();};
+  grelha.addEventListener('change',ev=>{if(ev.target.closest('.cmp-op-participa')&&!ev.target.checked){const ob=$('.cmp-op-obrigatoria input',ev.target.closest('.cmp-ciclo'));if(ob)ob.checked=false;}gravar();});
+  guardar.addEventListener('click',()=>{gravar();aviso('Ciclos guardados com sucesso.');$('#cmp-prazo-data')?.focus();});
   acoes.append(guardar);box.append(grelha,resumo,acoes);cartaoCiclos=box;return box;
  }
  function atualizarCiclos(e){
   if(!cartaoCiclos||!e)return;
-  const sel=e.ciclosDefinidos?e.p.ciclosObrigatorios:null;
+  const sel=e.ciclosDefinidos?e.p.ciclosObrigatorios:null,obrigatorios=window.cmCiclosProvaObrigatoria?.(e.p)||[];
   for(const l of all('.cmp-ciclo',cartaoCiclos)){
-   const id=l.dataset.ciclo,n=e.alunos.filter(a=>typeof cicloDoAluno==='function'&&cicloDoAluno(a)===id).length,inp=$('input',l);
-   if(document.activeElement!==inp)inp.checked=sel?sel.includes(id):true;
-   l.hidden=id==='sem'&&!n;l.classList.toggle('vazio',!n);const em=$('em',l),t=plural(n,'aluno','alunos');if(em.textContent!==t)em.textContent=t;
+   const id=l.dataset.ciclo,n=e.alunos.filter(a=>typeof cicloDoAluno==='function'&&cicloDoAluno(a)===id).length,part=$('.cmp-op-participa input',l),ob=$('.cmp-op-obrigatoria input',l);
+   if(document.activeElement!==part)part.checked=!!n&&(sel?sel.includes(id):true);part.disabled=!n;
+   if(document.activeElement!==ob)ob.checked=part.checked&&obrigatorios.includes(id);ob.disabled=!part.checked;
+   l.hidden=id==='sem'&&!n;l.classList.toggle('vazio',!n);l.classList.toggle('participa',part.checked);const em=$('em',l),t=plural(n,'aluno','alunos');if(em.textContent!==t)em.textContent=t;
   }
-  const r=$('.cmp-ciclos-resumo',cartaoCiclos),total=e.doCiclo.length,lista=typeof descricaoCiclosObrigatorios==='function'?descricaoCiclosObrigatorios(e.p).replace(/^Ciclos: /,''):'';
-  const txt=!e.ciclosDefinidos?'Ainda não escolheu. Por agora contam todos os alunos ('+total+'). Confirme a escolha para continuar.':sel.length?'Vão ser impressas '+plural(total,'autorização','autorizações')+' — '+lista+'.':'Nenhum ciclo escolhido: não será impressa nenhuma autorização.';
-  if(r.textContent!==txt)r.textContent=txt;r.classList.toggle('aviso',!e.ciclosDefinidos||!sel?.length);
-  const faixa=$('#cmp-faixa-ciclos');if(faixa){const t=e.ciclosDefinidos?(sel.length?'A mostrar só os alunos de: '+lista:'Nenhum ciclo escolhido.'):'A mostrar todos os alunos: ainda não escolheu os ciclos.';const s=$('span',faixa);if(s.textContent!==t)s.textContent=t;}
+  const r=$('.cmp-ciclos-resumo',cartaoCiclos),total=e.doCiclo.length,lista=typeof descricaoCiclosObrigatorios==='function'?descricaoCiclosObrigatorios(e.p).replace(/^Ciclos: /,''):'',obrig=window.cmDescricaoProvaObrigatoria?.(e.p)||'';
+  const txt=!e.ciclosDefinidos?'Ainda não escolheu. Por agora contam todos os alunos ('+total+'). Confirme a escolha para continuar.':total?'Participam: '+lista+'. Prova obrigatória em: '+(obrig||'nenhum ciclo')+'. Vão ser impressas '+plural(total,'autorização','autorizações')+'.':'Nenhum ciclo escolhido: não será impressa nenhuma autorização.';
+  if(r.textContent!==txt)r.textContent=txt;r.classList.toggle('aviso',!e.ciclosDefinidos||!total);
+  const faixa=$('#cmp-faixa-ciclos');if(faixa){const t=e.ciclosDefinidos?(total?'A mostrar só os alunos de: '+lista:'Nenhum ciclo escolhido.'):'A mostrar todos os alunos: ainda não escolheu os ciclos.';const s=$('span',faixa);if(s.textContent!==t)s.textContent=t;}
+ }
+
+ // Prazo das autorizações: terminado, quem não entregou fica registado automaticamente.
+ let cartaoPrazo;
+ function construirPrazo(){
+  const box=make('div','box cmp-prazo');box.append(make('h3','','Prazo para entregar as autorizações'),make('p','cmp-nota','Terminado o prazo, quem não entregou fica registado automaticamente: SIM nos ciclos com prova obrigatória e NÃO nos restantes. As respostas já lidas nunca mudam.'));
+  const linha=make('div','cmp-prazo-linha'),campo=make('div','cmp-prazo-campo'),lab=make('label','','Último dia de entrega'),inp=make('input');lab.htmlFor='cmp-prazo-data';inp.type='date';inp.id='cmp-prazo-data';campo.append(lab,inp);
+  const guardar=make('button','btn btn-primary','Guardar prazo'),remover=make('button','btn btn-secondary','Remover prazo');guardar.type='button';remover.type='button';
+  guardar.addEventListener('click',()=>{if(!inp.value){inp.focus();return;}if(window.cmDefinirPrazoConsentimentos?.(inp.value))aviso('Prazo guardado com sucesso.');agendar();});
+  remover.addEventListener('click',()=>{if(window.cmDefinirPrazoConsentimentos?.(''))aviso('Prazo removido com sucesso.');inp.value='';agendar();});
+  linha.append(campo,guardar,remover);const est=make('p','cmp-prazo-estado');est.setAttribute('role','status');
+  box.append(linha,est);cartaoPrazo=box;return box;
+ }
+ function atualizarPrazo(e){
+  if(!cartaoPrazo||!e)return;
+  const p=e.p,prazo=p.prazoConsentimentos||'',inp=$('#cmp-prazo-data',cartaoPrazo),est=$('.cmp-prazo-estado',cartaoPrazo),prev=window.cmPrevisaoPrazo?.(p)||{sim:0,nao:0},efeito=prev.sim+' SIM e '+prev.nao+' NÃO';
+  if(document.activeElement!==inp)inp.value=prazo;
+  $('.cmp-prazo-linha .btn-secondary',cartaoPrazo).hidden=!prazo;
+  let t='Sem prazo definido: as respostas em falta continuam «por receber».';
+  if(prazo){
+   if(window.cmPrazoConsentimentosTerminado?.(p))t='O prazo terminou a '+dataCurta(prazo)+'. Registados automaticamente: '+efeito+'. Para desfazer, escolha uma data futura ou remova o prazo.';
+   else{const d=diasAteProva({dataProva:prazo});t='Prazo até '+dataCurta(prazo)+' ('+(d>0?(d===1?'falta 1 dia':'faltam '+d+' dias'):'termina hoje')+'). Se terminasse agora: '+efeito+'.';}
+  }
+  const depois=!!prazo&&!!p.dataProva&&prazo>String(p.dataProva).slice(0,10);if(depois)t+=' Atenção: o prazo fica depois do dia da prova.';
+  if(est.textContent!==t)est.textContent=t;est.classList.toggle('aviso',depois);
  }
 
  // Autorizações em falta por turma, com reimpressão só das que faltam.
@@ -12898,11 +13036,11 @@ window.CMPercurso=(()=>{
   for(const a of e.doCiclo){const ano=String(a.ano||''),turma=String(a.turma||''),k=ano+'\u0000'+turma;if(!grupos.has(k))grupos.set(k,{ano,turma,total:0,falta:0});const g=grupos.get(k);g.total++;if(!respostaDe(e.p,a))g.falta++;}
   const lista=[...grupos.values()].sort((x,y)=>(x.ano+' '+x.turma).localeCompare(y.ano+' '+y.turma,'pt',{numeric:true}));
   const faltam=lista.reduce((s,g)=>s+g.falta,0),sig=JSON.stringify(lista);
-  $('.cmp-falta-topo .cmp-nota',cartaoFalta).textContent=faltam?plural(faltam,'autorização por receber','autorizações por receber')+'. Se um aluno perdeu o papel, reimprima só o da turma dele.':'Todas as autorizações foram recebidas.';
+  $('.cmp-falta-topo .cmp-nota',cartaoFalta).textContent=faltam?plural(faltam,'autorização por receber','autorizações por receber')+'. Se um aluno perdeu o papel, reimprima só o da turma dele.':e.doCiclo.some(a=>a.consentimento?.automaticoPrazo)?'Não há autorizações por receber. Quem não entregou ficou registado automaticamente no fim do prazo.':'Todas as autorizações foram recebidas.';
   const todas=$('.cmp-falta-topo .btn',cartaoFalta);todas.textContent='Imprimir todas as que faltam ('+faltam+')';todas.disabled=!faltam;
   if(cartaoFalta.dataset.sig===sig)return;cartaoFalta.dataset.sig=sig;
   const ul=$('.cmp-falta-lista',cartaoFalta);ul.replaceChildren(...lista.map(g=>{
-   const li=make('li',g.falta?'':'ok'),tx=make('div');tx.append(make('b','',[g.ano,g.turma].filter(Boolean).join(' ')||'Sem turma'),make('small','',g.falta?g.falta+' de '+g.total+' por receber':'Todas recebidas'));
+   const li=make('li',g.falta?'':'ok'),tx=make('div');tx.append(make('b','',[g.ano,g.turma].filter(Boolean).join(' ')||'Sem turma'),make('small','',g.falta?g.falta+' de '+g.total+' por receber':'Todas registadas'));
    li.append(make('span','cont',g.falta?String(g.falta):'✓'),tx);
    if(g.falta){const b=make('button','btn btn-secondary','Imprimir');b.type='button';b.setAttribute('aria-label','Imprimir as autorizações em falta de '+[g.ano,g.turma].filter(Boolean).join(' '));b.addEventListener('click',()=>imprimirEmFalta(g.ano,g.turma));li.append(b);}
    return li;}));
@@ -12922,7 +13060,7 @@ window.CMPercurso=(()=>{
   const h=$(':scope>h3',docs);if(h)h.after(faixa);else docs.prepend(faixa);
   const qr=cartaoQR('Leitor de autorizações no telemóvel','Abre o leitor desta prova. Depois, basta introduzir a password definida acima.',()=>prova()?'consentimentos.html?prova='+encodeURIComponent(prova().id):null);qrs.push(qr);
   montarPassos('consentimentos',[
-   {key:'ciclos',titulo:'Ciclos',nos:[construirCiclos()],feito:e=>e.ciclosDefinidos},
+   {key:'ciclos',titulo:'Ciclos e prazo',nos:[construirCiclos(),construirPrazo()],feito:e=>e.ciclosDefinidos},
    {key:'recolha',titulo:'Acompanhar',nos:[atalhoDocs('O texto, o desenho e a impressão das autorizações estão em Documentos.','Ir para Documentos',()=>abrirEtapa('documentos')),docs,construirFalta()],feito:e=>e.imp.autorizacoes||e.respondidos>0||semAutorizacoes(e)},
    {key:'leitor',titulo:'Ler respostas',nos:[pass,qr],feito:e=>e.doCiclo.length>0&&e.respondidos>=e.doCiclo.length||semAutorizacoes(e)}
   ]);
@@ -12998,7 +13136,7 @@ window.CMPercurso=(()=>{
    const tx=make('div'),st=make('strong');st.append(make('span','et',c.titulo),x.t);tx.append(st,make('small','',x.d));
    const bt=make('button','btn '+(i===atual?'btn-primary':'btn-secondary'),x.feito?'Rever':x.acao[0]);bt.type='button';bt.addEventListener('click',x.acao[1]);
    li.append(ok,tx,bt);return li;}));}
-  const p=e.p,dl=$('dl',ficha),linhas=[['Data',dataCurta(p.dataProva)||'—'],['Ano letivo',p.anoLetivo||'—'],['Escola',p.nomeEscola||'—',1],['Prova obrigatória para',e.ciclosDefinidos?(p.ciclosObrigatorios.length?descricaoCiclosObrigatorios(p).replace(/^Ciclos: /,''):'Nenhum ciclo'):'Por escolher',1]];
+  const p=e.p,dl=$('dl',ficha),linhas=[['Data',dataCurta(p.dataProva)||'—'],['Ano letivo',p.anoLetivo||'—'],['Escola',p.nomeEscola||'—',1],['Ciclos que participam',e.ciclosDefinidos?(e.doCiclo.length?descricaoCiclosObrigatorios(p).replace(/^Ciclos: /,''):'Nenhum ciclo'):'Por escolher',1],['Prova obrigatória em',e.ciclosDefinidos?(window.cmDescricaoProvaObrigatoria?.(p)||'Nenhum ciclo'):'Por escolher',1],['Prazo das autorizações',dataCurta(p.prazoConsentimentos)||'Sem prazo',1]];
   const assinatura=JSON.stringify([linhas,Object.entries(p.escaloesConfig||{}).map(([k,c])=>[k,c.ativo,c.distanciaMetros]),e.ativos.map(a=>a.escalaoId)]);
   if(ficha.dataset.sig!==assinatura){ficha.dataset.sig=assinatura;dl.replaceChildren(...linhas.map(([k,v,largo])=>{const w=make('div',largo?'largo':'');w.append(make('dt','',k),make('dd','',v));return w;}));
    const ul=$('.cmp-escaloes',ficha);ul.replaceChildren();
@@ -13042,7 +13180,7 @@ window.CMPercurso=(()=>{
   const vazio=$('#cmp-lista-vazia');if(vazio)vazio.hidden=!!(e&&e.alunos.length);
   const nuvem=$('#cloud-status');if(nuvem){const t=nuvem.textContent.trim();if(nuvem.title!==t)nuvem.title=t;}
   const semProva=$('#provas-dropdown option[value=""]');if(semProva&&/[\p{Extended_Pictographic}]|^--/u.test(semProva.textContent))semProva.textContent='Nenhuma prova — crie a primeira';
-  atualizarDigitos(e);atualizarGrupos(e);atualizarCiclos(e);atualizarFalta(e);qrs.forEach(q=>q._atualizar());
+  atualizarDigitos(e);atualizarGrupos(e);atualizarCiclos(e);atualizarPrazo(e);atualizarFalta(e);qrs.forEach(q=>q._atualizar());setTimeout(()=>window.cmAvaliarPrazoConsentimentos?.(),0);
   const contas=$('#btn-menu-utilizadores');if(contas){if(window.eAdministrador?.())contas.style.removeProperty('display');else contas.style.setProperty('display','none','important');}
   const avSem=$('#cmp-aviso-semcorrida');if(avSem){const n=e?e.semCorrida.length:0;avSem.hidden=!n;if(n){const t=plural(n,'aluno com dorsal não tem corrida','alunos com dorsal não têm corrida')+': a chegada será recusada na meta.',s=$('span',avSem);if(s.textContent!==t)s.textContent=t;}}
   paginar(id,lista,atual);
@@ -13803,6 +13941,10 @@ html[data-tema="escuro"] .cmp-vazio{background:#121a28}
 html[data-tema="escuro"] .cmp-vazio h3{color:var(--tone-txt)!important}
 html[data-tema="escuro"] .cmp-ciclo{background:#121a28}
 html[data-tema="escuro"] .cmp-ciclo em{color:var(--tone-txt)}
+html[data-tema="escuro"] .cmp-ciclo-ops label{background:#121a28}
+html[data-tema="escuro"] .cmp-ciclo-ops label:has(input:checked){color:var(--tone-txt)}
+html[data-tema="escuro"] .cmp-prazo-estado{color:var(--tone-txt)}
+html[data-tema="escuro"] .cmp-prazo-estado.aviso{background:#3d3312;color:#f5e0a5;border:1px solid #72602b}
 html[data-tema="escuro"] .cmp-ciclos-resumo.aviso{background:#3d3312;color:#f5e0a5;border:1px solid #72602b}
 html[data-tema="escuro"] .cmp-faixa-ciclos{color:var(--tone-txt)}
 html[data-tema="escuro"] .cmp-qr-img{background:#121a28}

@@ -37,6 +37,10 @@ window.CMTema=(()=>{
 })();
 /* O administrador acede a todas as provas, tal como na gestão: a password dele vale nos leitores e no quadro. */
 window.cmAdminComPassword=(estado,password)=>!!password&&(estado?.utilizadores||[]).some(c=>(c.tipo==='administrador'||(c.user==='admin'&&!c.tipo))&&c.pass===password);
+/* O número entre parênteses é o ano de escolaridade equivalente: «1(10)» é o 1.º ano de um curso profissional, ou seja, o 10.º ano. */
+window.cmAnoEquivalente=ano=>{const m=String(ano??'').match(/\(\s*(\d{1,2})\s*[^)]*\)/),n=m?Number(m[1]):NaN;return n>=1&&n<=12?n:null;};
+/* O prazo das autorizações vale até ao fim do dia escolhido, na hora deste aparelho. */
+window.cmPrazoConsentimentosTerminado=(prova,agora=new Date())=>{const m=String(prova?.prazoConsentimentos||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return !!m&&agora>=new Date(+m[1],+m[2]-1,+m[3]+1);};
 /* Avisos que ficam visíveis até serem resolvidos ou fechados. */
 window.CMAvisos=(()=>{
  function mostrar(id,texto){
@@ -10527,7 +10531,7 @@ const CMConsentimento=(()=>{
    const registos={...(p.consentimentos || {})};
    const vigente=(chave,reg)=>!limpezas[chave] || reg?.limpeza===limpezas[chave].operacao && Number(reg.revisao)>Number(limpezas[chave].revisao);
    for(const [chave,reg] of Object.entries(registos))if(!vigente(chave,reg))delete registos[chave];
-   for(const [chave,reg] of Object.entries(remoto?.consentimentos || {}))if(vigente(chave,reg) && (!registos[chave] || Number(reg.revisao)>Number(registos[chave].revisao)))registos[chave]={...reg};
+   for(const [chave,reg] of Object.entries(remoto?.consentimentos || {}))if(vigente(chave,reg) && (!registos[chave] || (!reg.automaticoPrazo!==!registos[chave].automaticoPrazo?!reg.automaticoPrazo:Number(reg.revisao)>Number(registos[chave].revisao))))registos[chave]={...reg};
    if(p.consentimentos || remoto?.consentimentos || Object.keys(limpezas).length)p.consentimentos=registos;
    aplicar(p);
   }
@@ -10572,7 +10576,7 @@ const CMConsentimento=(()=>{
    const ativoRestaurado=aluno?.desativadoPorConsentimento?(reg?.reativacaoGestao?reg.reativacaoGestao.ativo:reg?.ativoAntes!==false):aluno?.ativo!==false;
    limpezas[chave]={revisao:Math.max(Number(reg?.revisao)||0,Number(limpezas[chave]?.revisao)||0)+1,operacao,em,por:String(operador || ''),ativoRestaurado};
   }
-  prova.consentimentosLimpos=limpezas;prova.consentimentos={};aplicar(prova);return prova;
+  prova.consentimentosLimpos=limpezas;prova.consentimentos={};delete prova.prazoConsentimentos;aplicar(prova);return prova;
  }
  async function hashPassword(password,sal){
   if(!globalThis.crypto?.subtle)throw Error('Abra a plataforma por HTTPS para definir ou validar a password do leitor.');
@@ -11180,7 +11184,7 @@ function atualizarAcessoLeitorConsentimentos(){
  const prova=valido?estadoConsentimentos.provas.find(p=>String(p.id)===provaConsentimentos):null;ce('proof-name').textContent=prova?(prova.nome || prova.tituloDorsal || 'Prova'):'';
  atualizarSelecaoTurmaConsentimentos();renderHistoricoConsentimentos();atualizarSincronizacaoConsentimentos();
 }
-function cicloAlunoConsentimentos(a){if(/\b(cef|pief|pca|efa|prof)/i.test(String(a?.ano ?? '')))return 'sem';const m=String(a?.ano ?? '').match(/\d+/) || String(a?.turma ?? '').match(/^\D*(\d{1,2})/),n=m?Number(m[1] ?? m[0]):NaN;return n>=1&&n<=4?'c1':n>=5&&n<=6?'c2':n>=7&&n<=9?'c3':n>=10&&n<=12?'sec':'sem';}
+function cicloAlunoConsentimentos(a){const equivalente=cmAnoEquivalente(a?.ano);if(equivalente===null&&/\b(cef|pief|pca|efa|prof)/i.test(String(a?.ano ?? '')))return 'sem';const m=String(a?.ano ?? '').match(/\d+/) || String(a?.turma ?? '').match(/^\D*(\d{1,2})/),n=equivalente ?? (m?Number(m[1] ?? m[0]):NaN);return n>=1&&n<=4?'c1':n>=5&&n<=6?'c2':n>=7&&n<=9?'c3':n>=10&&n<=12?'sec':'sem';}
 function alunosDaProvaConsentimentos(){if(!acessoValidoConsentimentos())return [];const p=estadoConsentimentos.provas.find(p=>String(p.id)===provaConsentimentos),ciclos=Array.isArray(p?.ciclosObrigatorios)?p.ciclosObrigatorios:null;return (p?.participantes || []).filter(a=>!ciclos || ciclos.includes(cicloAlunoConsentimentos(a)));}
 function campoTurmaConsentimentos(aluno,campo){return String(aluno?.[campo] ?? '').trim();}
 function preencherSelecaoTurmaConsentimentos(select,valores,placeholder){
@@ -11234,7 +11238,7 @@ async function validarPasswordConsentimentos(event){
 }
 function renderHistoricoConsentimentos(){
  const list=ce('history');list.replaceChildren();if(!acessoValidoConsentimentos()){const item=document.createElement('li');item.textContent='Introduza a password para consultar os registos.';list.append(item);return;}
- const proof=estadoConsentimentos.provas.find(p=>String(p.id)===provaConsentimentos),rows=(proof?.participantes || []).filter(a=>['SIM','NAO'].includes(a.consentimento?.resposta)).sort((a,b)=>b.consentimento.registadoEm-a.consentimento.registadoEm).slice(0,20);
+ const proof=estadoConsentimentos.provas.find(p=>String(p.id)===provaConsentimentos),rows=(proof?.participantes || []).filter(a=>['SIM','NAO'].includes(a.consentimento?.resposta)&&!a.consentimento.automaticoPrazo).sort((a,b)=>b.consentimento.registadoEm-a.consentimento.registadoEm).slice(0,20);
  for(const a of rows){const li=document.createElement('li'),title=document.createElement('strong'),info=document.createElement('small');title.textContent=(a.consentimento.resposta!=='NAO'?'SIM':a.consentimento.reativacaoGestao?.ativo===true?'SIM (reativado pelo administrador)':'NÃO')+' · '+a.nome;info.textContent='Processo '+a.processo+' · '+[a.ano,a.turma].filter(Boolean).join(' / ')+(a.consentimento.motivo?' · '+a.consentimento.motivo:'');li.append(title,info);list.append(li);}
  if(!rows.length){const li=document.createElement('li');li.textContent='Ainda não há respostas registadas nesta prova.';list.append(li);}
 }
@@ -11286,13 +11290,15 @@ async function receberCapturaConsentimento(image,result){
  const proof=estadoConsentimentos.provas.find(p=>String(p.id)===provaConsentimentos),aluno=proof?.participantes?.find(a=>a.consentimentoId===result.identificacao.alunoId);
  if(!aluno)throw Error('O aluno não está na lista atual. Gere um novo documento na gestão.');
  if(!result.requerConfirmacao){piscarVerdeConsentimento();ultimaConfirmacaoConsentimentos=Date.now();}
+ const registoPrazo=proof.consentimentos?.[aluno.consentimentoId];
+ if(!registoPrazo?.leituraAberta&&(registoPrazo?.automaticoPrazo||(!registoPrazo&&cmPrazoConsentimentosTerminado(proof)))){if(result.requerConfirmacao){piscarVerdeConsentimento();ultimaConfirmacaoConsentimentos=Date.now();}feedbackConsentimentos('Prazo terminado','A autorização de '+aluno.nome+' não foi registada porque o prazo já terminou. Para a aceitar, o administrador tem de escolher «Permitir nova leitura» em Autorizações.','error');agendarLeituraConsentimentos(0);return;}
  if(['SIM','NAO'].includes(proof.consentimentos?.[aluno.consentimentoId]?.resposta) && !proof.consentimentos[aluno.consentimentoId].leituraAberta){
   if(result.requerConfirmacao){piscarVerdeConsentimento();ultimaConfirmacaoConsentimentos=Date.now();}
   feedbackConsentimentos('Consentimento já lido','A leitura repetida foi ignorada. O registo de '+aluno.nome+' mantém-se inalterado.','success');agendarLeituraConsentimentos(0);return;
  }
  const pendente=entradasFilaConsentimentos().find(c=>c.identificacao.alunoId===aluno.consentimentoId);
  if(pendente){if(result.requerConfirmacao){piscarVerdeConsentimento();ultimaConfirmacaoConsentimentos=Date.now();}feedbackConsentimentos('Leitura já recebida',aluno.nome+' · A aguardar sincronização. Pode ler o próximo documento.','success');agendarLeituraConsentimentos(0);return;}
- capturaConsentimento={...result,operacao:CMConsentimento.id(),guardado:false,nome:aluno.nome,acesso:{...acessoConsentimentos},limpeza:proof.consentimentosLimpos?.[aluno.consentimentoId]?.operacao || ''};
+ capturaConsentimento={...result,operacao:CMConsentimento.id(),noPrazo:!cmPrazoConsentimentosTerminado(proof),guardado:false,nome:aluno.nome,acesso:{...acessoConsentimentos},limpeza:proof.consentimentosLimpos?.[aluno.consentimentoId]?.operacao || ''};
  if(result.requerConfirmacao)delete capturaConsentimento.resposta;
  if(capturaConsentimento.resposta==='SIM'){feedbackConsentimentos('SIM reconhecido',aluno.nome+' · Pode apresentar o próximo documento.','success');return guardarCapturaConsentimento();}
  clearTimeout(timerConsentimentos);timerConsentimentos=null;ce('capture-panel').hidden=false;ce('aluno-lido').textContent=aluno.nome;ce('aluno-turma').textContent='Processo '+aluno.processo+' · Ano '+aluno.ano+' · Turma '+aluno.turma;
@@ -11336,7 +11342,7 @@ async function processarFilaConsentimentos(repetir=false){
     await dbConsentimentos.runTransaction(async tx=>{const snapshot=await tx.get(refConsentimentos);if(!snapshot.exists)throw Error('Os dados da prova já não estão disponíveis.');const fresh=snapshot.data();
      if(!acessoValidoConsentimentos(fresh,capture.identificacao.provaId) || acessoConsentimentos?.hash!==capture.acesso.hash){acessoExpirado=fresh;throw Error('O acesso expirou. Introduza novamente a password do leitor e repita as leituras por guardar.');}
      if(!limpezaCapturaConsentimentoValida(capture,fresh)){final={fresh,descartado:true};return;}
-     const resultado=CMConsentimento.registar(fresh,capture.identificacao.provaId,capture.identificacao.alunoId,capture.resposta,capture.motivo,'leitor-consentimentos',capture.operacao);if(!resultado.repetido)tx.set(refConsentimentos,CMConsentimento.estadoNuvem(fresh));final={fresh,repetido:resultado.repetido};
+     const registoNaNuvem=fresh.provas?.find(p=>String(p.id)===capture.identificacao.provaId)?.consentimentos?.[capture.identificacao.alunoId];if(registoNaNuvem?.automaticoPrazo&&capture.noPrazo)registoNaNuvem.leituraAberta=true;const resultado=CMConsentimento.registar(fresh,capture.identificacao.provaId,capture.identificacao.alunoId,capture.resposta,capture.motivo,'leitor-consentimentos',capture.operacao);if(!resultado.repetido)tx.set(refConsentimentos,CMConsentimento.estadoNuvem(fresh));final={fresh,repetido:resultado.repetido};
     });
     capture.guardado=!final.descartado;const indice=filaConsentimentos.indexOf(capture);if(indice>=0)filaConsentimentos.splice(indice,1);atualizarDadosConsentimentos(final.fresh);capture.concluir?.(!final.descartado);capture.concluir=null;
    }catch(error){capture.erro=error.message || 'Verifique a ligação e repita a gravação.';capture.concluir?.(false);capture.concluir=null;if(acessoExpirado)atualizarDadosConsentimentos(acessoExpirado);break;}
