@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-PT">
-<head><script id="cm-correcoes">
+<head><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%231d5fd1'/%3E%3Cpath d='M7 19V5m0 1c4-3 7 3 11 0v8c-4 3-7-3-11 0' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"><script id="cm-correcoes">
 /* Regras comuns: procura por dorsal, texto seguro, revisão da importação, gravação, numeração e avisos. */
 
 // ---------- Texto seguro ----------
@@ -1616,6 +1616,8 @@ window.CMTema=(()=>{
  addEventListener('storage',e=>{if(e.key===K)aplicar();});
  return {pref,atual,definir,ciclar,botao,aplicar};
 })();
+/* O administrador acede a todas as provas, tal como na gestão: a password dele vale nos leitores e no quadro. */
+window.cmAdminComPassword=(estado,password)=>!!password&&(estado?.utilizadores||[]).some(c=>(c.tipo==='administrador'||(c.user==='admin'&&!c.tipo))&&c.pass===password);
 /* Avisos que ficam visíveis até serem resolvidos ou fechados. */
 window.CMAvisos=(()=>{
  function mostrar(id,texto){
@@ -5315,7 +5317,7 @@ const CMTextoConsentimento=(()=>{
                 <span id="current-user-display">---</span>
             </div>
             <div class="backup-controls"><div class="partilha-top-controls"><button type="button" id="btn-partilhar-resultados" class="btn btn-secondary btn-sm" onclick="abrirPartilhaResultados()" disabled>🔗 Criar link externo</button><button type="button" id="btn-eliminar-partilha" class="btn btn-danger btn-sm" onclick="eliminarLinkResultados()" hidden>Eliminar link</button></div>
-                <a href="Resultados.html?v=20261011-cache-fix" target="_blank" onclick="return prepararAberturaQuadroGestao(this)" class="btn btn-primary btn-sm" title="Abrir Quadro Eletrónico em Direto num novo separador ou projetor">📺 Quadro ao Vivo</a>
+                <a href="resultados.html?v=20261011-cache-fix" target="_blank" onclick="return prepararAberturaQuadroGestao(this)" class="btn btn-primary btn-sm" title="Abrir Quadro Eletrónico em Direto num novo separador ou projetor">📺 Quadro ao Vivo</a>
                 <button class="btn btn-secondary btn-sm" onclick="exportarBackup()" title="Descarregar cópia de segurança completa em JSON">💾 Backup</button>
                 <button class="btn btn-secondary btn-sm" onclick="let el=document.getElementById('import-backup-file'); el.value=''; el.click();" title="Restaurar ficheiro de backup JSON">📂 Importar</button>
                 <input type="file" id="import-backup-file" accept=".json" style="display:none;" onchange="importarBackup(event)">
@@ -5575,7 +5577,7 @@ const CMTextoConsentimento=(()=>{
    <div><label for="consent-estado">Resposta</label><select id="consent-estado" onchange="atualizarAreaConsentimentos()"><option value="">Todas</option><option value="PENDENTE">Por receber</option><option value="SIM">SIM</option><option value="REATIVADO">SIM — reativado pelo administrador</option><option value="NAO">NÃO</option></select></div>
    <div><label for="consent-pesquisa">Aluno / processo</label><input id="consent-pesquisa" placeholder="Pesquisar…" oninput="atualizarAreaConsentimentos()"></div>
   </div>
-  <div class="consent-actions"><button type="button" class="btn btn-primary" onclick="imprimirConsentimentos()">🖨️ Imprimir documentos da lista</button><a class="btn btn-secondary" id="consent-abrir-leitor" href="Consentimentos.html" target="_blank" rel="noopener" onclick="if(!assegurarAcessoProva())return false;this.href='Consentimentos.html?prova='+encodeURIComponent(currentProva.id)">📷 Abrir leitor de consentimentos</a><button type="button" class="btn btn-danger" id="consent-limpar-abrir" onclick="abrirLimpezaConsentimentos()">Limpar registos de autorizações</button></div>
+  <div class="consent-actions"><button type="button" class="btn btn-primary" onclick="imprimirConsentimentos()">🖨️ Imprimir documentos da lista</button><a class="btn btn-secondary" id="consent-abrir-leitor" href="consentimentos.html" target="_blank" rel="noopener" onclick="if(!assegurarAcessoProva())return false;this.href='consentimentos.html?prova='+encodeURIComponent(currentProva.id)">📷 Abrir leitor de consentimentos</a><button type="button" class="btn btn-danger" id="consent-limpar-abrir" onclick="abrirLimpezaConsentimentos()">Limpar registos de autorizações</button></div>
   <p id="consent-limpeza-status" class="consent-hint" role="status"></p>
   <p id="consent-resumo" class="consent-hint" role="status"></p>
   <p class="consent-hint">Antes de usar o leitor noutro dispositivo, confirme que a gestão indica «Sincronizado» após gerar os documentos.</p>
@@ -5937,7 +5939,7 @@ const CMTextoConsentimento=(()=>{
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
                     <h3 style="margin: 0; border: none; padding: 0;">3. Classificação e Pódios em Tempo Real</h3>
                     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <a href="Resultados.html?v=20261011-cache-fix" target="_blank" onclick="return prepararAberturaQuadroGestao(this)" class="btn btn-outline btn-sm" style="color: var(--brand-accent); border-color: var(--brand-accent);" title="Abrir Quadro Eletrónico para Projetor ou TV">📺 Quadro Eletrónico</a>
+                        <a href="resultados.html?v=20261011-cache-fix" target="_blank" onclick="return prepararAberturaQuadroGestao(this)" class="btn btn-outline btn-sm" style="color: var(--brand-accent); border-color: var(--brand-accent);" title="Abrir Quadro Eletrónico para Projetor ou TV">📺 Quadro Eletrónico</a>
                         <input type="text" id="search-resultados" placeholder="🔍 Filtrar atleta/dorsal..." oninput="atualizarTabelaResultados()" style="height: 38px; padding: 0 12px; font-size: 13px; min-width: 170px;">
                         <select id="filtro-escalao-resultados" onchange="atualizarTabelaResultados()" style="height: 38px; padding: 0 12px; font-size: 13px;">
                             <option value="">🏆 Todos os Escalões</option>
@@ -8625,7 +8627,7 @@ function prepararAberturaQuadroGestao(link) {
     const token=crypto.randomUUID();
     try { localStorage.setItem('cortaMatoAcessoQuadroGestao',JSON.stringify({token,user,authVersion:Number(conta.authVersion||1),expires:Date.now()+600000})); }
     catch(e){alert('Não foi possível abrir o quadro com a sessão atual. Permita o armazenamento neste navegador e tente novamente.');return false;}
-    link.href='Resultados.html?origem=gestao&utilizador='+encodeURIComponent(user)+'&sessao='+encodeURIComponent(token)+'&v='+Date.now();
+    link.href='resultados.html?origem=gestao&utilizador='+encodeURIComponent(user)+'&sessao='+encodeURIComponent(token)+'&v='+Date.now();
     return true;
 }
 function obterUtilizadorAtual() {
@@ -12119,7 +12121,7 @@ function atualizarAcoesPartilhaResultados(){
 }
 function urlPartilhaResultados(id){
  const base=/^https?:$/.test(location.protocol)?location.href:'https://nmscl.github.io/cortamato/index.html';
- const url=new URL(location.protocol==='file:'?'resultados.html':'Resultados.html',base);url.search='';url.hash='';url.searchParams.set('partilha',id);return url.href;
+ const url=new URL('resultados.html',base);url.search='';url.hash='';url.searchParams.set('partilha',id);return url.href;
 }
 function mostrarPartilhaResultados(prova,config,mensagem=''){
  partilhaProvaModalId=prova.id;document.getElementById('modal-partilha-resultados').hidden=false;document.getElementById('partilha-nome-prova').textContent=prova.nome || 'Prova selecionada';
@@ -12338,7 +12340,7 @@ window.CMVisual=(()=>{
    b.addEventListener('keydown',event=>{if(!['ArrowDown','ArrowUp','ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;event.preventDefault();const active=all('.tab-btn').filter(n=>!n.disabled);let index=active.indexOf(b);index=event.key==='Home'?0:event.key==='End'?active.length-1:(index+(['ArrowDown','ArrowRight'].includes(event.key)?1:-1)+active.length)%active.length;active[index].click();active[index].focus();});
   });
   const links=element('div','visual-sidebar-links');
-  for(const [name,url] of [['Leitor de dorsais','Leitor.html'],['Leitor de consentimentos','Consentimentos.html'],['Todas as aplicações','../../index.html']]){const a=element('a','',name+' ↗');a.href=url;a.target='_blank';a.rel='noopener';links.append(a);}aside.append(links);
+  for(const [name,url] of [['Leitor de dorsais','leitor.html'],['Leitor de consentimentos','consentimentos.html'],['Todas as aplicações','index.html']]){const a=element('a','',name+' ↗');a.href=url;a.target='_blank';a.rel='noopener';links.append(a);}aside.append(links);
   const brand=$('.brand-badge');brand.prepend(mark());rename('.brand-text-title','Corta-Mato');rename('.brand-text-sub','Organização escolar');
   const backups=$('.backup-controls'),items=all(':scope > button',backups),account=items.find(b=>b.id==='btn-menu-utilizadores');
   items.forEach(b=>{if(b.textContent.includes('Backup'))b.textContent='Exportar cópia de segurança';else if(b.textContent.includes('Importar'))b.textContent='Restaurar cópia de segurança';else if(b===account)b.textContent='Contas e utilizadores';else if(b.textContent.includes('Sair'))b.textContent='Terminar sessão';});
@@ -12380,7 +12382,7 @@ window.CMVisual=(()=>{
  }
  function step(panel,n,text){if(panel&&!$('.visual-reader-step',panel)){const p=element('div','visual-reader-step',text);p.dataset.step=n;panel.prepend(p);}}
  function readers(){
-  const header=$('main>header');if(header){header.prepend(mark());const home=element('a','visual-reader-home','Aplicações ↗');home.href='../../index.html';home.target='_blank';home.rel='noopener';header.append(home);}
+  const header=$('main>header');if(header){header.prepend(mark());const home=element('a','visual-reader-home','Aplicações ↗');home.href='index.html';home.target='_blank';home.rel='noopener';header.append(home);}
   if(document.body.classList.contains('visual-dorsais')){
    const proof=$('#proof')?.closest('.panel'),camera=$('#camera')?.closest('.panel'),manual=$('#manual')?.closest('.panel'),history=$('#history')?.closest('.panel');
    proof?.classList.add('visual-reader-proof');camera?.classList.add('visual-reader-camera');manual?.classList.add('visual-reader-manual');history?.classList.add('visual-reader-history');
@@ -12671,7 +12673,7 @@ window.CMPercurso=(()=>{
   // Tema também no menu: no telemóvel o botão do cabeçalho sai para o campo da prova ter espaço.
   let tema=null;if(window.CMTema){tema=make('button','btn btn-secondary cmp-tema-menu');tema.type='button';tema.dataset.cmTemaBtn='';tema.addEventListener('click',()=>CMTema.ciclar());}
   grupo('Conta',[quem,tema,rotulo($('#btn-menu-utilizadores'),'Contas e utilizadores'),rotulo(porClique(bc,/terminarSessao/),'Terminar sessão')]);
-  grupo('Leitores (abrem noutro separador)',[['Leitor de dorsais','Leitor.html','phone'],['Leitor de autorizações','Consentimentos.html','document'],['Validação de fitas','Fita.html','award']].map(([t,u,i])=>{const a=make('a','btn btn-secondary cmp-menu-leitor');a.append(ico(i),make('span','',t));a.href=u;a.target='_blank';a.rel='noopener';return a;}));
+  grupo('Leitores (abrem noutro separador)',[['Leitor de dorsais','leitor.html','phone'],['Leitor de autorizações','consentimentos.html','document'],['Validação de fitas','fita.html','award']].map(([t,u,i])=>{const a=make('a','btn btn-secondary cmp-menu-leitor');a.append(ico(i),make('span','',t));a.href=u;a.target='_blank';a.rel='noopener';return a;}));
   all('.btn',caixa).forEach(b=>b.removeAttribute('style'));
   menu.append(sum,caixa);acoes.append(menu);
   top.replaceChildren(marca,campo,acoes);
@@ -12918,7 +12920,7 @@ window.CMPercurso=(()=>{
   const impLista=porClique($('.consent-actions',docs),/imprimirConsentimentos/);if(impLista){impLista.className='btn btn-secondary';rotulo(impLista,'Imprimir só os da lista');}
   const faixa=make('div','cmp-faixa-ciclos');faixa.id='cmp-faixa-ciclos';const mudar=make('button','btn btn-secondary','Mudar ciclos');mudar.type='button';mudar.addEventListener('click',()=>irPasso('consentimentos','ciclos'));faixa.append(make('span'),mudar);
   const h=$(':scope>h3',docs);if(h)h.after(faixa);else docs.prepend(faixa);
-  const qr=cartaoQR('Leitor de autorizações no telemóvel','Abre o leitor desta prova. Depois, basta introduzir a password definida acima.',()=>prova()?'Consentimentos.html?prova='+encodeURIComponent(prova().id):null);qrs.push(qr);
+  const qr=cartaoQR('Leitor de autorizações no telemóvel','Abre o leitor desta prova. Depois, basta introduzir a password definida acima.',()=>prova()?'consentimentos.html?prova='+encodeURIComponent(prova().id):null);qrs.push(qr);
   montarPassos('consentimentos',[
    {key:'ciclos',titulo:'Ciclos',nos:[construirCiclos()],feito:e=>e.ciclosDefinidos},
    {key:'recolha',titulo:'Acompanhar',nos:[atalhoDocs('O texto, o desenho e a impressão das autorizações estão em Documentos.','Ir para Documentos',()=>abrirEtapa('documentos')),docs,construirFalta()],feito:e=>e.imp.autorizacoes||e.respondidos>0||semAutorizacoes(e)},
@@ -12931,11 +12933,11 @@ window.CMPercurso=(()=>{
   const emoji=$('.races-cockpit-toolbar span[style*="font-size: 22px"]',cockpit);if(emoji)emoji.remove();
   const avisoSem=make('div','cmp-aviso-sem');avisoSem.id='cmp-aviso-semcorrida';avisoSem.hidden=true;const verSem=make('button','btn btn-secondary','Ver quem são');verSem.type='button';verSem.addEventListener('click',()=>window.cmMostrarSemCorrida());avisoSem.append(make('span'),verSem);cockpit.prepend(avisoSem);
   rotulo($(':scope>h3',meta),'Registar as chegadas');rotulo($('h3',res),'Classificação em tempo real');
-  const quadro=$('a[href^="Resultados.html"]',res);if(quadro)quadro.remove();
+  const quadro=$('a[href^="resultados.html"]',res);if(quadro)quadro.remove();
   // Só a exportação fica aqui: resultados, pódio e justificações imprimem-se em Documentos.
   all('.report-actions button',res).filter(b=>/imprimir|abrirModalTurmaDT/i.test(b.getAttribute('onclick')||'')).forEach(b=>b.remove());
-  const qrLeitor=cartaoQR('Leitor de dorsais no telemóvel','Na meta, leia o QR dos dorsais com a câmara: cada leitura conta uma volta ou a chegada.','Leitor.html');
-  const qrFita=cartaoQR('Validação de fitas no telemóvel','Para quem confere as fitas de cada atleta à chegada.','Fita.html');qrs.push(qrLeitor,qrFita);
+  const qrLeitor=cartaoQR('Leitor de dorsais no telemóvel','Na meta, leia o QR dos dorsais com a câmara: cada leitura conta uma volta ou a chegada.','leitor.html');
+  const qrFita=cartaoQR('Validação de fitas no telemóvel','Para quem confere as fitas de cada atleta à chegada.','fita.html');qrs.push(qrLeitor,qrFita);
   const duas=make('div','cmp-duas');duas.append(qrLeitor,qrFita);
   montarPassos('cronometragem',[
    {key:'partidas',titulo:'Partidas',nos:[cockpit],feito:e=>e.corridas>0&&e.iniciadas>=e.corridas},
