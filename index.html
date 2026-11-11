@@ -340,6 +340,9 @@ window.CMDocs=(()=>{
   podio:{nome:'Pódio das turmas',perfil:'podio-turmas',
    colunas:[col('lugar','Lugar',25,'center',{forte:1}),col('turma','Turma',75,'left',{forte:1})],
    base(){const b=cabecalho('{titulo}','Pódio das turmas','{secao}');b.assinatura.visible=false;b.logos.visible=false;Object.assign(b.corpo,{y:53.6,altura:81.8,size:12,destaque:false});return b;}},
+  ciclos:{nome:'Participantes por ciclo',perfil:'participantes-ciclo',
+   colunas:[col('dorsal','Dorsal',10,'center',{forte:1}),col('processo','N.º de processo',14),col('nome','Nome do aluno',36,'left',{forte:1}),col('ano','Ano',10),col('turma','Turma',10),col('escalao','Escalão',20),col('presente','Presente',10,'center',{caixa:1,on:false})],
+   base(){const b=cabecalho('Participantes por ciclo','{escola}','{secao}');b.data.text='Prova: {data}';b.assinatura.visible=false;b.logos.visible=false;Object.assign(b.corpo,{y:53.6,altura:81.8,size:10.5,destaque:false,textoAntes:'{total} participante(s) com dorsal ativo, sem voluntários.'});return b;}},
   faltas:{nome:'Justificação de faltas',perfil:'declaracao-dt',
    colunas:[col('dorsal','Dorsal',12,'center',{forte:1}),col('nome','Nome do aluno',44,'left'),col('processo','Processo',16),col('estado','Estado / resultado',28)],
    base(){const b=cabecalho('{titulo}','Declaração de Participação para Justificação de Faltas','Turma: {secao} | Data: {data}');
@@ -365,6 +368,23 @@ window.CMDocs=(()=>{
    if(o.agrupar==='turma'){const g=new Map();alunos.forEach(a=>{const k=turmaTxt(a.ano,a.turma);if(!g.has(k))g.set(k,[]);g.get(k).push(a);});return [...g.entries()].sort((x,y)=>ordenarTxt(x[0],y[0])).map(([secao,l])=>({secao,vars:{turma:secao},linhas:l.map(linha)}));}
    // Por grupo: quem pertence a dois grupos aparece em ambas as listas.
    return grupos.map(g=>({secao:g.nome,linhas:alunos.filter(g.t).map(linha)})).filter(s=>s.linhas.length);
+  },
+  // Participantes: alunos com dorsal ativo, sem voluntários, separados pelo ciclo calculado a partir do ano.
+  ciclos(p,o){
+   const nomes=new Map((typeof CICLOS_ESCOLARES!=='undefined'?CICLOS_ESCOLARES:[]).map(c=>[c.id,c.nome]));
+   const alunos=ordenarAlunosDistribuicaoDorsais(p.participantes||[]).filter(a=>a.ativo&&!a.voluntario);
+   const porCiclo=new Map([...nomes.keys()].map(k=>[k,[]]));
+   alunos.forEach(a=>{const k=cicloDoAluno(a);(porCiclo.get(k)||porCiclo.set(k,[]).get(k)).push(a);});
+   const linha=a=>({c:{dorsal:a.dorsal,processo:a.processo,nome:a.nome,ano:a.ano,turma:limparTurma(a.turma),escalao:a.escalaoNome||p.escaloesConfig?.[a.escalaoId]?.nome||'',presente:''}});
+   const lista=[...porCiclo.entries()].filter(([k,l])=>l.length&&(!o.ciclo||k===o.ciclo));
+   let saida;
+   if(o.agrupar==='turma'){
+    saida=[];
+    lista.forEach(([k,l])=>{const g=new Map();l.forEach(a=>{const t=turmaTxt(a.ano,a.turma);if(!g.has(t))g.set(t,[]);g.get(t).push(a);});[...g.entries()].sort((x,y)=>ordenarTxt(x[0],y[0])).forEach(([t,la])=>saida.push({secao:(nomes.get(k)||k)+' · '+t,vars:{turma:t},linhas:la.map(linha)}));});
+   }else saida=lista.map(([k,l])=>({secao:nomes.get(k)||k,linhas:l.map(linha)}));
+   // Com todos os ciclos, a primeira página abre com o total de cada um.
+   if(saida.length&&!o.ciclo&&lista.length>1)saida[0].bloco=()=>h('div',{class:'cmd-resumo'},lista.map(([k,l])=>h('div',{},h('b',{},String(l.length)),h('span',{},nomes.get(k)||k))),h('div',{class:'cmd-resumo-total'},h('b',{},String(alunos.length)),h('span',{},'Total')));
+   return saida;
   },
   entrega(p,o){
    let alunos=ordenarAlunosDistribuicaoDorsais(p.participantes||[]).filter(a=>a.ativo&&!a.voluntario);
@@ -402,7 +422,7 @@ window.CMDocs=(()=>{
   const nomes=['Ana Ribeiro','Tomás Carvalho','Maria Sousa','Rui Marques','Inês Pinto','Diogo Lima','Beatriz Alves','João Nunes','Marta Simões','Pedro Costa','Sara Gomes','Hugo Santos','Rita Lopes','André Dias'];
   const base=nomes.map((nome,i)=>({cls:['cmd-ouro','cmd-prata','cmd-bronze'][i]||'',c:{pos:(i+1)+'º',dorsal:String(101+i*7),processo:String(12000+i*3),nome,ano:'9',turma:'9º ano A',escalao:'Juvenis Masculinos',tempo:'0'+(9+i%3)+':'+String(10+i*3).padStart(2,'0'),entregue:'',estado:'Participou / concluiu',grupo:'Prova Adaptada',confirmado:'',obs:''}}));
   if(id==='podio')return [{secao:'Juvenis Masculinos',vars:{escalao:'Juvenis Masculinos'},linhas:['9º ano A','9º ano C','8º ano B','8º ano A','7º ano D'].map((turma,i)=>({c:{lugar:(i+1)+'º',turma}})),bloco:()=>h('div',{class:'cmd-podio'},['9º ano A','9º ano C','8º ano B'].map((t,i)=>h('div',{class:'cmd-lugar'+(i+1)},h('b',{},(i+1)+'º'),h('strong',{},t))))}];
-  return [{secao:id==='classificacoes'?'Juvenis Masculinos':id==='confirmacao'?'Prova Adaptada':'9º ano A',vars:{turma:'9º ano A',escalao:'Juvenis Masculinos'},linhas:base}];
+  return [{secao:id==='classificacoes'?'Juvenis Masculinos':id==='confirmacao'?'Prova Adaptada':id==='ciclos'?'3.º ciclo':'9º ano A',vars:{turma:'9º ano A',escalao:'Juvenis Masculinos'},linhas:base}];
  }
 
  /* ---------- Colunas ---------- */
@@ -537,8 +557,8 @@ window.CMDocs=(()=>{
  }
 
  /* ---------- Imprimir ---------- */
- const MARCA={consent:'autorizacoes',dorsal:'dorsais',cert:'certificados',entrega:'entrega',confirmacao:'confirmacao',classificacoes:'classificacoes',turma:'turma',podio:'podio',faltas:'faltas'};
- const SEM_DADOS={confirmacao:'Não há alunos marcados com Prova Adaptada, limitações funcionais ou voluntário nesta seleção.',entrega:'Não há alunos ativos para imprimir.',classificacoes:'Não há resultados elegíveis para imprimir (excluindo Prova Adaptada).',turma:'Não há resultados para imprimir.',podio:'Não há alunos com turma e classificação válida para calcular o pódio.',faltas:'Não há alunos com participação registada nesta seleção.'};
+ const MARCA={consent:'autorizacoes',dorsal:'dorsais',cert:'certificados',entrega:'entrega',confirmacao:'confirmacao',ciclos:'ciclos',classificacoes:'classificacoes',turma:'turma',podio:'podio',faltas:'faltas'};
+ const SEM_DADOS={ciclos:'Não há participantes com dorsal ativo nesta seleção.',confirmacao:'Não há alunos marcados com Prova Adaptada, limitações funcionais ou voluntário nesta seleção.',entrega:'Não há alunos ativos para imprimir.',classificacoes:'Não há resultados elegíveis para imprimir (excluindo Prova Adaptada).',turma:'Não há resultados para imprimir.',podio:'Não há alunos com turma e classificação válida para calcular o pódio.',faltas:'Não há alunos com participação registada nesta seleção.'};
  async function imprimirDoc(id,o={}){
   if(!assegurarAcessoProva())return;
   try{await carregarVisuaisSelecionadosCSV(['doc_'+id]);}catch(e){}
@@ -581,6 +601,12 @@ window.CMDocs=(()=>{
    const filtro=a=>{const q=busca.value.trim().toLocaleLowerCase('pt');return (!t.s.value||turmaTxt(a.ano,a.turma)===t.s.value)&&(!q||(a.nome+' '+a.dorsal).toLocaleLowerCase('pt').includes(q));};
    return {campos:[t.no,h('label',{class:'cmd-campo'},h('span',{},'Aluno'),busca)],resumo:()=>{const l=lista().filter(filtro),sem=l.filter(a=>window.cmSemCorrida?.(a)).length;return plural(l.length,'dorsal','dorsais')+' em A5'+(sem?' · '+plural(sem,'aluno sem corrida','alunos sem corrida')+': a chegada será recusada':'');},vazio:()=>!lista().some(filtro),async imprimir(){window.cmFiltroDorsais=t.s.value||busca.value.trim()?filtro:null;try{await window.imprimirDorsais();}finally{window.cmFiltroDorsais=null;}}};
   },
+  ciclos(mudou){
+   const p=currentProva,ativos=(p.participantes||[]).filter(a=>a.ativo&&!a.voluntario),conta=id=>ativos.filter(a=>cicloDoAluno(a)===id).length;
+   const lista=(typeof CICLOS_ESCOLARES!=='undefined'?CICLOS_ESCOLARES:[]).filter(c=>conta(c.id));
+   const c=campoLista('Ciclo',[['','Todos os ciclos'],...lista.map(x=>[x.id,x.nome+' ('+conta(x.id)+')'])],mudou),g=campoLista('Organizar',[['','Uma lista por ciclo'],['turma','Uma lista por ciclo e turma']],mudou),ler=()=>({ciclo:c.s.value,agrupar:g.s.value});
+   return {campos:[c.no,g.no],resumo:()=>{const n=secoes('ciclos',ler()).reduce((t,s)=>t+s.linhas.length,0);return n?plural(n,'participante','participantes')+' · '+plural(contarPaginas('ciclos',ler()),'página','páginas'):'Nenhum participante nesta seleção';},vazio:()=>!secoes('ciclos',ler()).length,imprimir:()=>imprimirDoc('ciclos',ler())};
+  },
   entrega(mudou){
    const lista=()=>(currentProva.participantes||[]).filter(a=>a.ativo&&!a.voluntario),g=campoLista('Organizar',[['','Toda a prova numa só lista'],['turma','Uma lista por turma']],mudou),t=campoLista('Turma',[['','Todas as turmas'],...turmasDe(lista())],mudou),ler=()=>({agrupar:g.s.value,turma:t.s.value});
    return {campos:[g.no,t.no],resumo:()=>plural(contarPaginas('entrega',ler()),'página','páginas'),vazio:()=>!secoes('entrega',ler()).length,imprimir:()=>imprimirDoc('entrega',ler())};
@@ -614,6 +640,7 @@ window.CMDocs=(()=>{
   dorsal:{nome:'Dorsais',desc:'Um dorsal A5 por aluno, com número, nome e QR para a meta.'},
   entrega:{nome:'Lista de entrega',desc:'Lista para conferir a entrega dos dorsais, toda a prova ou por turma.'},
   confirmacao:{nome:'Confirmação de alunos',desc:'Prova Adaptada, limitações funcionais e voluntários, para confirmar antes da prova.'},
+  ciclos:{nome:'Participantes por ciclo',desc:'Os alunos que participam, separados por ciclo, com o total de cada um.'},
   classificacoes:{nome:'Resultados por escalão',desc:'Classificação oficial de cada escalão, com pódio destacado.'},
   turma:{nome:'Resultados por turma',desc:'Os resultados dos alunos de cada turma, para os diretores de turma.'},
   podio:{nome:'Pódio das turmas',desc:'Classificação das turmas em cada escalão.'},
@@ -621,7 +648,7 @@ window.CMDocs=(()=>{
   cert:{nome:'Certificados',desc:'Participação e Prova Adaptada, 1.º, 2.º e 3.º lugares: cada um com o seu desenho.'}
  };
  const GRUPOS=[
-  {titulo:'Antes da prova',sub:'Para enviar às famílias e entregar aos alunos.',docs:['consent','dorsal','entrega','confirmacao']},
+  {titulo:'Antes da prova',sub:'Para enviar às famílias e entregar aos alunos.',docs:['consent','dorsal','entrega','confirmacao','ciclos']},
   {titulo:'Depois da prova',sub:'Pode desenhá-los já. Ficam prontos a imprimir assim que houver resultados.',docs:['classificacoes','turma','podio','faltas','cert']}
  ];
  function estadoDoc(id){
@@ -632,6 +659,7 @@ window.CMDocs=(()=>{
   if(id==='dorsal')return ativos.length?{pronto:true,txt:plural(ativos.length,'dorsal','dorsais')}:semAlunos;
   if(id==='entrega')return ativos.length?{pronto:true,txt:plural(ativos.length,'aluno','alunos')}:semAlunos;
   if(id==='confirmacao'){if(!alunos.length)return semAlunos;const n=alunos.filter(a=>GRUPOS_ALUNOS.some(g=>g.t(a))).length;return n?{pronto:true,txt:plural(n,'aluno','alunos')}:{pronto:false,txt:'Marque os alunos em Alunos › Rever a lista.'};}
+  if(id==='ciclos'){if(!ativos.length)return semAlunos;const k=new Set(ativos.map(a=>cicloDoAluno(a))).size;return {pronto:true,txt:plural(ativos.length,'participante','participantes')+' em '+plural(k,'ciclo','ciclos')};}
   if(!res.length)return semRes;
   if(id==='cert')return {pronto:true,txt:'Pronto a imprimir'};
   const n=secoes(id,{}).length;if(!n)return semRes;
@@ -5079,6 +5107,22 @@ const CMTextoConsentimento=(()=>{
  .cmp-prazo-estado.aviso{background:#fff5d6;color:#5c4400;border:1px solid #f0d27a}
  .cmp-ciclos-resumo{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:16px;font-weight:700;color:#fff;background:var(--tone);border-radius:14px;padding:14px 18px;margin:0 0 16px}
  .cmp-ciclos-resumo.aviso{background:#fff5d6;color:#5c4400;border:1px solid #f0d27a}
+ .cmp-ciclos-dia{margin:0 0 20px!important}
+ .cmp-ciclos-dia[hidden]{display:none!important}
+ .cmp-cd-topo{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 16px;margin:0 0 14px}
+ .cmp-cd-topo h3{margin:0 0 4px}
+ .cmp-cd-topo .cmp-nota{margin:0}
+ .cmp-cd-topo .btn{display:inline-flex;align-items:center;gap:8px;min-height:44px}
+ .cmp-cd-grelha{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+ .cmp-cd{display:flex;flex-direction:column;gap:2px;min-width:0;padding:14px 16px;border:1.5px solid var(--c-line);border-radius:16px;background:#fff}
+ .cmp-cd-nome{font-size:15px;font-weight:800;color:var(--c-ink)}
+ .cmp-cd strong{font:800 32px/1.1 var(--f-body);color:var(--tone-dk);font-variant-numeric:tabular-nums}
+ .cmp-cd-sub{font-size:13px;color:var(--c-muted)}
+ .cmp-cd-barra{height:6px;margin:8px 0 6px;border-radius:99px;background:var(--c-line);overflow:hidden}
+ .cmp-cd-barra i{display:block;height:100%;background:var(--tone);border-radius:99px}
+ .cmp-cd-meta{font-size:13px;font-weight:700;color:var(--c-ink);font-variant-numeric:tabular-nums}
+ .cmp-cd-total{border-color:var(--tone);background:var(--tone-wash)}
+ @media(max-width:640px){.cmp-cd-grelha{grid-template-columns:repeat(2,minmax(0,1fr))}.cmp-cd{padding:12px}.cmp-cd strong{font-size:26px}}
  .cmp-ciclos-acoes{display:flex;gap:10px;flex-wrap:wrap}
  .cmp-faixa-ciclos{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--tone-wash);border:1px solid var(--tone);color:var(--tone-dk);border-radius:14px;padding:12px 16px;margin:0 0 16px;font-weight:700}
  .cmp-faixa-ciclos .btn{min-height:42px!important;margin-left:auto}
@@ -12300,7 +12344,7 @@ const CMImpressao=(()=>{
   'resultados-turma':{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:10},
   'podio-turmas':{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:10},
   'declaracao-dt':{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:15},
-  'entrega-dorsais':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10},'confirmacao-alunos':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10}
+  'entrega-dorsais':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10},'confirmacao-alunos':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10},'participantes-ciclo':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10}
  };
  let sessao=null;
  function preparar(tipo){
@@ -12731,7 +12775,7 @@ window.CMPercurso=(()=>{
    {et:'documentos',t:'Imprimir certificados e relatórios',d:'Certificados, resultados, pódio das turmas e justificações de faltas.',feito:!!e&&e.imp.certificados,acao:['Abrir',()=>abrirEtapa('documentos')]}
   ];
  }
- const TIPOS_DOCUMENTOS=['autorizacoes','dorsais','entrega','confirmacao','classificacoes','turma','podio','faltas','certificados'];
+ const TIPOS_DOCUMENTOS=['autorizacoes','dorsais','entrega','confirmacao','ciclos','classificacoes','turma','podio','faltas','certificados'];
  function feitoEtapa(id,e){if(!e)return false;return {provas:true,documentos:e.imp.dorsais&&e.imp.certificados,dorsais:e.alunos.length>0&&!e.semDorsal&&!e.semCorrida.length,consentimentos:e.doCiclo.length>0&&e.respondidos>=e.doCiclo.length||semAutorizacoes(e),cronometragem:e.corridas>0&&e.terminadas>=e.corridas}[id];}
  function textoEtapa(id,e){
   if(!e)return id==='provas'?'Por criar':'—';
@@ -13082,6 +13126,41 @@ window.CMPercurso=(()=>{
    {key:'meta',titulo:'Chegadas',nos:[meta,duas],feito:e=>e.corridas>0&&e.terminadas>=e.corridas},
    {key:'classificacao',titulo:'Classificação',nos:[atalhoDocs('Resultados, pódio das turmas, justificações de faltas e certificados imprimem-se em Documentos.','Ir para Documentos',()=>abrirEtapa('documentos')),res]}
   ],kpi);
+  // Visível em Partidas, Chegadas e Classificação, logo abaixo dos números do dia.
+  (kpi||$('.cmp-cab',sec)).after(construirCiclosDia());
+ }
+ // Participantes por ciclo: alunos com dorsal ativo, sem voluntários, com o andamento na meta.
+ let cartaoCiclosDia;
+ function contagemCiclos(p){
+  const ciclos=typeof CICLOS_ESCOLARES!=='undefined'?CICLOS_ESCOLARES:[],porDorsal=new Map((p.resultados||[]).map(r=>[String(r.dorsal),r]));
+  const linhas=ciclos.map(c=>({id:c.id,nome:c.nome,anos:c.anos,part:0,meta:0,fora:0}));
+  for(const a of p.participantes||[]){
+   if(!a.ativo||a.voluntario||typeof cicloDoAluno!=='function')continue;
+   const l=linhas.find(x=>x.id===cicloDoAluno(a));if(!l)continue;l.part++;
+   const r=porDorsal.get(String(a.dorsal));if(!r||(r.processo!=null&&String(r.processo)!==String(a.processo)))continue;
+   if(r.desistencia||r.desqualificado)l.fora++;else l.meta++;
+  }
+  return linhas.filter(l=>l.part);
+ }
+ function construirCiclosDia(){
+  const box=make('section','box cmp-ciclos-dia');box.setAttribute('aria-label','Participantes por ciclo');
+  const topo=make('div','cmp-cd-topo'),tx=make('div');tx.append(make('h3','','Participantes por ciclo'),make('p','cmp-nota','Alunos com dorsal ativo, sem voluntários. Os números da meta mudam a cada chegada.'));
+  const imp=make('button','btn btn-secondary');imp.type='button';imp.append(ico('print'),make('span','','Imprimir por ciclo'));imp.addEventListener('click',()=>window.CMDocs?.abrirImpressao('ciclos',{ficar:true}));
+  topo.append(tx,imp);box.append(topo,make('div','cmp-cd-grelha'));cartaoCiclosDia=box;return box;
+ }
+ function atualizarCiclosDia(e){
+  if(!cartaoCiclosDia)return;cartaoCiclosDia.hidden=!e;if(!e)return;
+  const linhas=contagemCiclos(e.p),tot=linhas.reduce((s,l)=>({part:s.part+l.part,meta:s.meta+l.meta,fora:s.fora+l.fora}),{part:0,meta:0,fora:0});
+  const g=$('.cmp-cd-grelha',cartaoCiclosDia),sig=JSON.stringify([linhas,tot]);if(g.dataset.sig===sig)return;g.dataset.sig=sig;
+  if(!linhas.length){g.replaceChildren(make('p','cmp-nota','Ainda não há alunos com dorsal ativo.'));return;}
+  const cartao=(nome,sub,v,total)=>{
+   const c=make('div','cmp-cd'+(total?' cmp-cd-total':'')),falta=v.part-v.meta-v.fora,barra=make('div','cmp-cd-barra'),f=make('i');
+   f.style.width=(v.part?Math.round(v.meta/v.part*100):0)+'%';barra.append(f);barra.setAttribute('aria-hidden','true');
+   c.append(make('span','cmp-cd-nome',nome),make('strong','',String(v.part)),make('span','cmp-cd-sub',sub),barra,make('span','cmp-cd-meta',v.meta+' na meta · '+falta+' por chegar'+(v.fora?' · '+v.fora+' desist./DSC':'')));
+   c.setAttribute('aria-label',nome+': '+plural(v.part,'participante','participantes')+', '+v.meta+' na meta, '+falta+' por chegar'+(v.fora?', '+v.fora+' desistências ou desclassificações':''));
+   return c;
+  };
+  g.replaceChildren(...linhas.map(l=>cartao(l.nome,l.anos,l,false)),cartao('Total',plural(linhas.length,'ciclo','ciclos'),tot,true));
  }
  function etapaDocumentos(){
   const sec=$('#tab-documentos'),guarda=$('#cmd-parque');
@@ -13180,7 +13259,7 @@ window.CMPercurso=(()=>{
   const vazio=$('#cmp-lista-vazia');if(vazio)vazio.hidden=!!(e&&e.alunos.length);
   const nuvem=$('#cloud-status');if(nuvem){const t=nuvem.textContent.trim();if(nuvem.title!==t)nuvem.title=t;}
   const semProva=$('#provas-dropdown option[value=""]');if(semProva&&/[\p{Extended_Pictographic}]|^--/u.test(semProva.textContent))semProva.textContent='Nenhuma prova — crie a primeira';
-  atualizarDigitos(e);atualizarGrupos(e);atualizarCiclos(e);atualizarPrazo(e);atualizarFalta(e);qrs.forEach(q=>q._atualizar());setTimeout(()=>window.cmAvaliarPrazoConsentimentos?.(),0);
+  atualizarDigitos(e);atualizarGrupos(e);atualizarCiclos(e);atualizarPrazo(e);atualizarFalta(e);atualizarCiclosDia(e);qrs.forEach(q=>q._atualizar());setTimeout(()=>window.cmAvaliarPrazoConsentimentos?.(),0);
   const contas=$('#btn-menu-utilizadores');if(contas){if(window.eAdministrador?.())contas.style.removeProperty('display');else contas.style.setProperty('display','none','important');}
   const avSem=$('#cmp-aviso-semcorrida');if(avSem){const n=e?e.semCorrida.length:0;avSem.hidden=!n;if(n){const t=plural(n,'aluno com dorsal não tem corrida','alunos com dorsal não têm corrida')+': a chegada será recusada na meta.',s=$('span',avSem);if(s.textContent!==t)s.textContent=t;}}
   paginar(id,lista,atual);
@@ -13237,6 +13316,11 @@ window.CMPercurso=(()=>{
 .cmd-podio>div{flex:1;min-width:0;padding:4mm 2mm;border:2px solid;border-radius:3mm;text-align:center;box-sizing:border-box}
 .cmd-podio b{display:block;font-size:2em;font-weight:900;line-height:1.1}
 .cmd-podio strong{display:block;font-size:1.4em;font-weight:800}
+.cmd-resumo{display:flex;flex-wrap:wrap;gap:3mm;padding-bottom:5mm;box-sizing:border-box}
+.cmd-resumo>div{flex:1 1 0;min-width:22mm;padding:2.5mm 2mm;border:1.5px solid var(--lin,#cbd5e1);border-radius:2.5mm;text-align:center;box-sizing:border-box}
+.cmd-resumo b{display:block;font-size:1.9em;font-weight:900;line-height:1.1;color:var(--cab,#0f2b5c)}
+.cmd-resumo span{display:block;font-size:.95em;font-weight:700}
+.cmd-resumo>.cmd-resumo-total{border-color:var(--cab,#0f2b5c);border-width:2px}
 .cmd-podio>.cmd-lugar1{border-color:#d6aa35;background:#fff7d6}.cmd-podio>.cmd-lugar2{border-color:#94a3b8;background:#f1f5f9}.cmd-podio>.cmd-lugar3{border-color:#c48b62;background:#fff0e5}
 body.cmp .cmd-pagina table.cmd-tabela{display:table!important;width:100%!important;min-width:0!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;border-collapse:collapse!important;table-layout:fixed!important;background:transparent!important;color:inherit!important;font-size:1em!important;font-family:inherit!important}
 body.cmp .cmd-pagina .cmd-tabela thead{display:table-header-group!important;position:static!important}
@@ -13946,6 +14030,8 @@ html[data-tema="escuro"] .cmp-ciclo-ops label:has(input:checked){color:var(--ton
 html[data-tema="escuro"] .cmp-prazo-estado{color:var(--tone-txt)}
 html[data-tema="escuro"] .cmp-prazo-estado.aviso{background:#3d3312;color:#f5e0a5;border:1px solid #72602b}
 html[data-tema="escuro"] .cmp-ciclos-resumo.aviso{background:#3d3312;color:#f5e0a5;border:1px solid #72602b}
+html[data-tema="escuro"] .cmp-cd{background:#121a28}
+html[data-tema="escuro"] .cmp-cd strong{color:var(--tone-txt)}
 html[data-tema="escuro"] .cmp-faixa-ciclos{color:var(--tone-txt)}
 html[data-tema="escuro"] .cmp-qr-img{background:#121a28}
 html[data-tema="escuro"] .cmp-qr-url{color:var(--tone-txt)}
