@@ -5088,7 +5088,9 @@ const CMTextoConsentimento=(()=>{
  .cmp-ciclo b{font-size:18px;color:var(--c-ink)}
  .cmp-ciclo-anos{font-size:14px;color:var(--c-muted);font-weight:500}
  .cmp-ciclo em{font-style:normal;font-size:14px;font-weight:800;color:var(--tone-dk);margin-top:4px}
- .cmp-ciclo.participa{border-color:var(--tone);background:var(--tone-wash)}
+ .cmp-ciclo-resp{display:block;margin-top:2px;font-size:13.5px;font-weight:700;color:var(--c-ink);font-variant-numeric:tabular-nums}
+.cmp-ciclo-resp[hidden]{display:none}
+.cmp-ciclo.participa{border-color:var(--tone);background:var(--tone-wash)}
  .cmp-ciclo.vazio{border-style:dashed}
  .cmp-ciclo.vazio em{color:var(--c-muted)}
  .cmp-ciclo.vazio .cmp-ciclo-ops{display:none}
@@ -12748,7 +12750,7 @@ window.CMPercurso=(()=>{
   {id:'dorsais',titulo:'Alunos',longo:'Alunos e dorsais',cor:'#1d5fd1',cor2:'#2a6fe0',escura:'#15479f',icone:'users',desc:'Inscreva os alunos, confirme a lista e numere os dorsais.',acao:['Adicionar aluno',()=>{abrirEtapa('dorsais','inscrever');setTimeout(()=>$('#man-nome')?.focus(),80);}],noPasso:'inscrever',
    dicas:['No Excel, guarde a pauta como «CSV UTF-8» e importe-a aqui.','Confirme a lista: um aluno sem escalão não entra em nenhuma corrida.','Inscrições tardias recebem o número seguinte, sem mudar os dorsais já impressos.']},
   {id:'consentimentos',titulo:'Autorizações',longo:'Autorizações das famílias',cor:'#6a3fd0',cor2:'#8456e6',escura:'#5030a3',icone:'document',desc:'Escolha os ciclos e o prazo, acompanhe quem já respondeu e registe as respostas com o leitor.',acao:['Imprimir autorizações',()=>window.CMDocs?.abrirImpressao('consent')],
-   dicas:['Escolha os ciclos que participam e, entre esses, em quais a prova é obrigatória. Só os ciclos que participam recebem autorização.','Cada documento tem um QR: o leitor no telemóvel reconhece a resposta SIM ou NÃO.','Se um aluno perder o papel, reimprima só as que faltam na turma dele.']},
+   dicas:['Escolha os ciclos que recebem autorização e, entre esses, aqueles em que a prova é obrigatória.','Cada documento tem um QR: o leitor no telemóvel reconhece a resposta SIM ou NÃO.','Se um aluno perder o papel, reimprima só as que faltam na turma dele.']},
   {id:'cronometragem',titulo:'Dia da prova',longo:'Dia da prova',cor:'#c93a1f',cor2:'#d33f1c',escura:'#9e2c16',icone:'timer',desc:'Dê a partida a cada escalão, registe as chegadas e acompanhe a classificação.',acao:['Abrir quadro ao vivo',()=>$('.cmp-live')?.click()],
    dicas:['Imprima os dorsais em Documentos depois das autorizações: os alunos com NÃO ficam de fora.','Carregue em «Iniciar partida» quando cada escalão parte e registe as chegadas pelo dorsal ou com o leitor no telemóvel.','O quadro ao vivo mostra pódios e tempos em tempo real, num projetor ou televisão.']}
  ];
@@ -12766,7 +12768,7 @@ window.CMPercurso=(()=>{
    {et:'documentos',t:'Preparar os documentos',d:'Logótipos, cor, letra e desenho de cada documento. Pode mudar sempre que quiser.',feito:!!e?.imp.documentos,acao:['Abrir',()=>abrirEtapa('documentos')]},
    {et:'dorsais',t:'Inscrever os alunos',d:!a?'Importe o ficheiro das turmas ou adicione um a um.':plural(a,'aluno inscrito','alunos inscritos')+(e.semCorrida.length?' · atenção: '+plural(e.semCorrida.length,'aluno sem corrida','alunos sem corrida'):''),feito:a>0&&!e.semCorrida.length,acao:e?.semCorrida.length?['Ver quem são',()=>window.cmMostrarSemCorrida()]:['Abrir',()=>abrirEtapa('dorsais','inscrever')]},
    {et:'dorsais',t:'Numerar os dorsais',d:!a?'Depois de inscrever os alunos.':e.semDorsal?plural(e.semDorsal,'aluno sem número','alunos sem número'):'Todos os alunos ativos têm número.',feito:a>0&&!e.semDorsal,acao:['Abrir',()=>abrirEtapa('dorsais','numerar')]},
-   {et:'consentimentos',t:'Escolher os ciclos e o prazo',d:e?.ciclosDefinidos?(typeof descricaoCiclosObrigatorios==='function'?descricaoCiclosObrigatorios(e.p):''):'Só os alunos dos ciclos que participam recebem autorização.',feito:!!e?.ciclosDefinidos,acao:['Escolher',()=>abrirEtapa('consentimentos','ciclos')]},
+   {et:'consentimentos',t:'Escolher os ciclos e o prazo',d:e?.ciclosDefinidos?(typeof descricaoCiclosObrigatorios==='function'?descricaoCiclosObrigatorios(e.p):''):'Marque os ciclos cujos alunos recebem autorização.',feito:!!e?.ciclosDefinidos,acao:['Escolher',()=>abrirEtapa('consentimentos','ciclos')]},
    {et:'documentos',t:'Imprimir as autorizações',d:semAutorizacoes(e)?'Não se aplica: nenhum ciclo escolhido.':e?plural(e.doCiclo.length,'documento','documentos')+' a imprimir':'Depois de escolher os ciclos.',feito:!!e&&(e.imp.autorizacoes||e.respondidos>0||semAutorizacoes(e)),acao:['Imprimir',()=>window.CMDocs?.abrirImpressao('consent')]},
    {et:'consentimentos',t:'Registar as respostas das famílias',d:semAutorizacoes(e)?'Não se aplica: nenhum ciclo escolhido.':e?.doCiclo.length?e.respondidos+' de '+e.doCiclo.length+' respostas registadas':'Use o leitor quando os documentos voltarem.',feito:!!e&&(e.doCiclo.length>0&&e.respondidos>=e.doCiclo.length||semAutorizacoes(e)),acao:['Abrir leitor',()=>abrirEtapa('consentimentos','leitor')]},
    {et:'documentos',t:'Imprimir os dorsais',d:'Um dorsal A5 por aluno ativo, com o código para a meta.',feito:!!e&&(e.imp.dorsais||e.iniciadas>0),acao:['Imprimir',()=>window.CMDocs?.abrirImpressao('dorsal')]},
@@ -13002,20 +13004,22 @@ window.CMPercurso=(()=>{
   const dig=parseInt($('#digitos-dorsal')?.value)||3,ini=parseInt($('#dorsal-inicial')?.value)||1,n=e?e.alunos.filter(a=>!a.voluntario).length:0,ultimo=ini+n-1,precisa=String(Math.max(ultimo,1)).length;
   av.hidden=!e||precisa<=dig;if(!av.hidden){const t='Com '+n+' alunos, o último dorsal é o '+ultimo+': precisa de '+precisa+' dígitos. Aumente «Dígitos do dorsal» para '+precisa+' para todos os dorsais terem o mesmo tamanho.';if(av.textContent!==t)av.textContent=t;}
  }
- // Ciclos: quais participam (recebem autorização) e, entre esses, em quais a prova é obrigatória.
+ // Ciclos: quais recebem autorização e, entre esses, em quais a prova é obrigatória.
+ // Aqui contam-se autorizações, não participantes: quem participa só se sabe com as respostas (Dia da prova › Participantes por ciclo).
  let cartaoCiclos;
  function construirCiclos(){
-  const box=make('div','box cmp-ciclos');box.append(make('h3','','Que ciclos participam na prova?'),make('p','cmp-nota','Só os alunos dos ciclos que participam recebem autorização e contam nas respostas. Entre esses, marque aqueles em que a prova é obrigatória. Pode mudar a escolha a qualquer momento.'));
-  const grelha=make('div','cmp-ciclos-grid');grelha.setAttribute('role','group');grelha.setAttribute('aria-label','Ciclos que participam e ciclos com prova obrigatória');
+  const box=make('div','box cmp-ciclos');box.append(make('h3','','A que ciclos se entregam autorizações?'),make('p','cmp-nota','Marque os ciclos cujos alunos recebem autorização e, entre esses, aqueles em que a prova é obrigatória. Os números são autorizações, não participantes: quantos alunos participam só se sabe com as respostas, em Dia da prova › Participantes por ciclo. Pode mudar a escolha a qualquer momento.'));
+  const grelha=make('div','cmp-ciclos-grid');grelha.setAttribute('role','group');grelha.setAttribute('aria-label','Ciclos que recebem autorização e ciclos com prova obrigatória');
   for(const c of ciclosDisponiveis()){
    const l=make('div','cmp-ciclo');l.dataset.ciclo=c.id;
    const opcao=(classe,texto)=>{const r=make('label',classe),i=make('input');i.type='checkbox';i.value=c.id;i.setAttribute('aria-label',texto+': '+c.nome);r.append(i,make('span','',texto));return r;};
-   const ops=make('div','cmp-ciclo-ops');ops.append(opcao('cmp-op-participa','Participa'),opcao('cmp-op-obrigatoria','Obrigatória'));
-   l.append(make('b','',c.nome),make('span','cmp-ciclo-anos',c.anos),make('em','','0 alunos'),ops);grelha.append(l);
+   const ops=make('div','cmp-ciclo-ops');ops.append(opcao('cmp-op-participa','Recebe autorização'),opcao('cmp-op-obrigatoria','Obrigatória'));
+   const resp=make('small','cmp-ciclo-resp');resp.hidden=true;
+   l.append(make('b','',c.nome),make('span','cmp-ciclo-anos',c.anos),make('em','','Sem alunos inscritos'),resp,ops);grelha.append(l);
   }
   const resumo=make('p','cmp-ciclos-resumo');resumo.setAttribute('role','status');
   const acoes=make('div','cmp-ciclos-acoes'),guardar=make('button','btn btn-primary','Confirmar ciclos');guardar.type='button';
-  // Um ciclo ainda sem alunos fica a participar: um aluno adicionado mais tarde não desaparece das autorizações sem aviso.
+  // Um ciclo ainda sem alunos fica a receber autorização: um aluno adicionado mais tarde não desaparece das autorizações sem aviso.
   const gravar=()=>{window.definirCiclosObrigatorios?.(all('.cmp-op-participa input',grelha).filter(i=>i.checked||i.disabled).map(i=>i.value),all('.cmp-op-obrigatoria input',grelha).filter(i=>i.checked&&!i.disabled).map(i=>i.value));agendar();};
   grelha.addEventListener('change',ev=>{if(ev.target.closest('.cmp-op-participa')&&!ev.target.checked){const ob=$('.cmp-op-obrigatoria input',ev.target.closest('.cmp-ciclo'));if(ob)ob.checked=false;}gravar();});
   guardar.addEventListener('click',()=>{gravar();aviso('Ciclos guardados com sucesso.');$('#cmp-prazo-data')?.focus();});
@@ -13024,14 +13028,19 @@ window.CMPercurso=(()=>{
  function atualizarCiclos(e){
   if(!cartaoCiclos||!e)return;
   const sel=e.ciclosDefinidos?e.p.ciclosObrigatorios:null,obrigatorios=window.cmCiclosProvaObrigatoria?.(e.p)||[];
+  const efetiva=a=>typeof respostaConsentimentoEfetiva==='function'?respostaConsentimentoEfetiva(a):(a.consentimento?.resposta||'PENDENTE');
   for(const l of all('.cmp-ciclo',cartaoCiclos)){
-   const id=l.dataset.ciclo,n=e.alunos.filter(a=>typeof cicloDoAluno==='function'&&cicloDoAluno(a)===id).length,part=$('.cmp-op-participa input',l),ob=$('.cmp-op-obrigatoria input',l);
+   const id=l.dataset.ciclo,doCiclo=e.alunos.filter(a=>typeof cicloDoAluno==='function'&&cicloDoAluno(a)===id),n=doCiclo.length,part=$('.cmp-op-participa input',l),ob=$('.cmp-op-obrigatoria input',l);
    if(document.activeElement!==part)part.checked=!!n&&(sel?sel.includes(id):true);part.disabled=!n;
    if(document.activeElement!==ob)ob.checked=part.checked&&obrigatorios.includes(id);ob.disabled=!part.checked;
-   l.hidden=id==='sem'&&!n;l.classList.toggle('vazio',!n);l.classList.toggle('participa',part.checked);const em=$('em',l),t=plural(n,'aluno','alunos');if(em.textContent!==t)em.textContent=t;
+   l.hidden=id==='sem'&&!n;l.classList.toggle('vazio',!n);l.classList.toggle('participa',part.checked);
+   // O número é o de autorizações. Com respostas lidas, uma segunda linha mostra o que já voltou.
+   const sim=doCiclo.filter(a=>efetiva(a)==='SIM').length,nao=doCiclo.filter(a=>efetiva(a)==='NAO').length,lidas=part.checked&&sim+nao>0;
+   const em=$('em',l),t=!n?'Sem alunos inscritos':!part.checked?plural(n,'aluno inscrito','alunos inscritos')+', sem autorização':lidas?plural(n,'autorização','autorizações'):plural(n,'autorização a imprimir','autorizações a imprimir');if(em.textContent!==t)em.textContent=t;
+   const resp=$('.cmp-ciclo-resp',l),tr=lidas?sim+' SIM · '+nao+' NÃO · '+(n-sim-nao)+' por receber':'';if(resp.textContent!==tr)resp.textContent=tr;resp.hidden=!tr;
   }
   const r=$('.cmp-ciclos-resumo',cartaoCiclos),total=e.doCiclo.length,lista=typeof descricaoCiclosObrigatorios==='function'?descricaoCiclosObrigatorios(e.p).replace(/^Ciclos: /,''):'',obrig=window.cmDescricaoProvaObrigatoria?.(e.p)||'';
-  const txt=!e.ciclosDefinidos?'Ainda não escolheu. Por agora contam todos os alunos ('+total+'). Confirme a escolha para continuar.':total?'Participam: '+lista+'. Prova obrigatória em: '+(obrig||'nenhum ciclo')+'. Vão ser impressas '+plural(total,'autorização','autorizações')+'.':'Nenhum ciclo escolhido: não será impressa nenhuma autorização.';
+  const txt=!e.ciclosDefinidos?'Ainda não escolheu. Por agora todos os alunos recebem autorização ('+total+'). Confirme a escolha para continuar.':total?'Recebem autorização: '+lista+'. Prova obrigatória em: '+(obrig||'nenhum ciclo')+'. '+(total===1?'Vai ser impressa 1 autorização':'Vão ser impressas '+total+' autorizações')+'. Os participantes só ficam definidos com as respostas.':'Nenhum ciclo escolhido: não será impressa nenhuma autorização.';
   if(r.textContent!==txt)r.textContent=txt;r.classList.toggle('aviso',!e.ciclosDefinidos||!total);
   const faixa=$('#cmp-faixa-ciclos');if(faixa){const t=e.ciclosDefinidos?(total?'A mostrar só os alunos de: '+lista:'Nenhum ciclo escolhido.'):'A mostrar todos os alunos: ainda não escolheu os ciclos.';const s=$('span',faixa);if(s.textContent!==t)s.textContent=t;}
  }
@@ -13215,7 +13224,7 @@ window.CMPercurso=(()=>{
    const tx=make('div'),st=make('strong');st.append(make('span','et',c.titulo),x.t);tx.append(st,make('small','',x.d));
    const bt=make('button','btn '+(i===atual?'btn-primary':'btn-secondary'),x.feito?'Rever':x.acao[0]);bt.type='button';bt.addEventListener('click',x.acao[1]);
    li.append(ok,tx,bt);return li;}));}
-  const p=e.p,dl=$('dl',ficha),linhas=[['Data',dataCurta(p.dataProva)||'—'],['Ano letivo',p.anoLetivo||'—'],['Escola',p.nomeEscola||'—',1],['Ciclos que participam',e.ciclosDefinidos?(e.doCiclo.length?descricaoCiclosObrigatorios(p).replace(/^Ciclos: /,''):'Nenhum ciclo'):'Por escolher',1],['Prova obrigatória em',e.ciclosDefinidos?(window.cmDescricaoProvaObrigatoria?.(p)||'Nenhum ciclo'):'Por escolher',1],['Prazo das autorizações',dataCurta(p.prazoConsentimentos)||'Sem prazo',1]];
+  const p=e.p,dl=$('dl',ficha),linhas=[['Data',dataCurta(p.dataProva)||'—'],['Ano letivo',p.anoLetivo||'—'],['Escola',p.nomeEscola||'—',1],['Ciclos com autorização',e.ciclosDefinidos?(e.doCiclo.length?descricaoCiclosObrigatorios(p).replace(/^Ciclos: /,''):'Nenhum ciclo'):'Por escolher',1],['Prova obrigatória em',e.ciclosDefinidos?(window.cmDescricaoProvaObrigatoria?.(p)||'Nenhum ciclo'):'Por escolher',1],['Prazo das autorizações',dataCurta(p.prazoConsentimentos)||'Sem prazo',1]];
   const assinatura=JSON.stringify([linhas,Object.entries(p.escaloesConfig||{}).map(([k,c])=>[k,c.ativo,c.distanciaMetros]),e.ativos.map(a=>a.escalaoId)]);
   if(ficha.dataset.sig!==assinatura){ficha.dataset.sig=assinatura;dl.replaceChildren(...linhas.map(([k,v,largo])=>{const w=make('div',largo?'largo':'');w.append(make('dt','',k),make('dd','',v));return w;}));
    const ul=$('.cmp-escaloes',ficha);ul.replaceChildren();
