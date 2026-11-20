@@ -847,8 +847,16 @@ window.CMDocs=(()=>{
     for(const grupo of grupos.values())grupo.sort((a,b)=>a.tempoProvaMs-b.tempoProvaMs).forEach((r,i)=>{if(incluirNoLoteCertificados(sel.value||'todos',r,i+1))n++;});
     return n;
    };
-   sel.addEventListener('change',mudou);
-   return {campos:[grupo,area],resumo:()=>plural(contar(),'certificado','certificados'),vazio:()=>!contar(),imprimir:()=>window.imprimirCertificados(),fechar(){sel.removeEventListener('change',mudou);casa.append(grupo);casaA.append(area);}};
+   // Em branco: só o fundo de cada tipo, sem dados, com o número de cópias de cada um.
+   if(![...sel.options].some(o=>o.value==='branco'))sel.append(opcao('branco','Em branco (só o fundo, sem dados)'));
+   if(!(resultadosClassificacao(currentProva)||[]).length)sel.value='branco';
+   const copias=h('input',{type:'number',class:'cmd-campo-in',min:'1',max:'200',value:'1','aria-label':'Cópias de cada tipo'});
+   const campoCopias=h('label',{class:'cmd-campo cmd-copias-branco',hidden:true},h('span',{},'Cópias de cada tipo (Participação, 1.º, 2.º e 3.º lugar)'),copias);
+   const branco=()=>sel.value==='branco',nCopias=()=>Math.max(1,Math.min(200,parseInt(copias.value,10)||1));
+   const ver=()=>{campoCopias.hidden=!branco();area.hidden=branco();};
+   const contarTodos=()=>branco()?4*nCopias():contar();
+   sel.addEventListener('change',ver);sel.addEventListener('change',mudou);copias.addEventListener('input',mudou);ver();
+   return {campos:[grupo,campoCopias,area],resumo:()=>plural(contarTodos(),'certificado','certificados')+(branco()?' em branco':''),vazio:()=>!contarTodos(),imprimir:()=>branco()?window.imprimirCertificados({branco:true,copias:nCopias()}):window.imprimirCertificados(),fechar(){sel.removeEventListener('change',mudou);sel.removeEventListener('change',ver);area.hidden=false;casa.append(grupo);casaA.append(area);}};
   }
  };
  function abrirImpressao(id,inicial={}){
@@ -1914,6 +1922,7 @@ window.CMDocs=(()=>{
   if(id==='entrega')return ativos.length?{pronto:true,txt:plural(ativos.length,'aluno','alunos')}:semAlunos;
   if(id==='confirmacao'){if(!alunos.length)return semAlunos;const n=alunos.filter(a=>GRUPOS_ALUNOS.some(g=>g.t(a))).length;return n?{pronto:true,txt:plural(n,'aluno','alunos')}:{pronto:false,txt:'Marque os alunos em Alunos › Rever a lista.'};}
   if(id==='ciclos'){if(!ativos.length)return semAlunos;const k=new Set(ativos.map(a=>cicloDoAluno(a))).size;return {pronto:true,txt:plural(ativos.length,'participante','participantes')+' em '+plural(k,'ciclo','ciclos')};}
+  if(id==='cert'&&!res.length)return {pronto:true,txt:'Em branco: pronto a imprimir. Com nomes: depois das primeiras chegadas.'};
   if(!res.length)return semRes;
   if(id==='cert')return {pronto:true,txt:'Pronto a imprimir'};
   const n=secoes(id,{}).length;if(!n)return semRes;
@@ -10854,6 +10863,15 @@ async function imprimirCertificados(opcoes = {}) {
     if (['certAssetsEditor','certLayoutsEditor'].some(c => refsCert[c] && !Object.prototype.hasOwnProperty.call(currentProva, c)) && typeof carregarVisuaisSelecionadosCSV === 'function') {
         try { await carregarVisuaisSelecionadosCSV(['certAssetsEditor','certLayoutsEditor']); } catch (erro) { console.error(erro); }
     }
+    // Em branco: só o fundo de cada tipo de certificado (Participação, 1.º, 2.º e 3.º lugar), sem qualquer dado.
+    if (!opcoes?.branco && !opcoes?.escalaoId && document.getElementById('cert-tipo')?.value === 'branco') opcoes = { ...opcoes, branco: true, copias: 1 };
+    if (opcoes?.branco) {
+        const copias = Math.max(1, Math.min(200, parseInt(opcoes.copias, 10) || 1));
+        let folhas = '';
+        for (const t of ['part', '1', '2', '3']) for (let i = 0; i < copias; i++) folhas += `<div class="cert-page cert-branco" data-cert-type="${t}" data-branco="1"></div>`;
+        document.getElementById('print-area').innerHTML = folhas;
+        return imprimirFolhasCertificados();
+    }
     if(!currentProva || !resultadosClassificacao(currentProva) || resultadosClassificacao(currentProva).length === 0) {
         alert("Não há resultados finais para gerar certificados."); return;
     }
@@ -10949,17 +10967,53 @@ async function imprimirCertificados(opcoes = {}) {
 
     if (!htmlPrint) { alert('Não há atletas elegíveis para o tipo de certificado selecionado.'); return; }
     printArea.innerHTML = htmlPrint;CMEstudio.nomesCertificados(printArea);
-
-    // Os fundos dos certificados são aplicados e carregados ANTES de abrir a impressão:
-    // aplicados só no momento de imprimir, a impressão era feita antes de a imagem estar pronta e saía sem fundo.
+    return imprimirFolhasCertificados();
+}
+// Última fase da impressão dos certificados, igual para os certificados com dados e em branco:
+// 1) letras carregadas; 2) desenho e fundo do editor em TODAS as folhas; 3) nomes encaixados; 4) fundos carregados; 5) imprimir.
+async function imprimirFolhasCertificados() {
+    const printArea = document.getElementById('print-area');
+    try { await Promise.race([document.fonts?.ready, new Promise(r => setTimeout(r, 4000))]); } catch (erro) {}
     try { window.aplicarEditorCertificadosImpressao?.(); } catch (erro) { console.error(erro); }
+    try { await Promise.race([document.fonts?.ready, new Promise(r => setTimeout(r, 4000))]); } catch (erro) {}
+    try { encaixarNomesCertificadosImpressao(printArea); } catch (erro) { console.error(erro); }
     const fundos = new Set();
     printArea.querySelectorAll('.cert-page').forEach(p => { const m = String(p.style.backgroundImage || '').match(/^url\(["']?([\s\S]*?)["']?\)$/); if (m && m[1]) fundos.add(m[1]); });
     printArea.querySelectorAll('img.cert-bg').forEach(i => { if (i.src) fundos.add(i.src); });
     const carregar = src => { const i = new Image(); i.src = src; return (i.decode ? i.decode() : new Promise((ok, falha) => { i.onload = ok; i.onerror = falha; })).catch(() => {}); };
-    Promise.race([Promise.all([...fundos].map(carregar)), new Promise(r => setTimeout(r, 8000))])
-        .then(() => new Promise(r => setTimeout(r, 80)))
-        .then(() => imprimirDocumentoCM('certificados'));
+    await Promise.race([Promise.all([...fundos].map(carregar)), new Promise(r => setTimeout(r, 8000))]);
+    await new Promise(r => setTimeout(r, 80));
+    imprimirDocumentoCM('certificados');
+}
+// Rede de segurança para os nomes: mede cada nome já com a letra real, numa cópia da folha fora do ecrã,
+// e reduz o tamanho até caber numa linha dentro da folha (a impressão não deixa medir a folha verdadeira).
+function encaixarNomesCertificadosImpressao(area) {
+    const caixa = document.createElement('div');
+    caixa.style.cssText = 'position:fixed;left:-30000px;top:0;visibility:hidden;pointer-events:none;contain:layout';
+    document.body.append(caixa);
+    try {
+        area.querySelectorAll('.cert-page').forEach(page => {
+            const nome = page.querySelector('.cert-nome');
+            if (!nome || !nome.textContent.trim() || nome.style.display === 'none') return;
+            const copia = page.cloneNode(true);
+            Object.assign(copia.style, { display: 'block', width: '297mm', height: '210mm', position: 'relative', backgroundImage: 'none' });
+            copia.querySelectorAll('img').forEach(i => i.removeAttribute('src'));
+            caixa.replaceChildren(copia);
+            const n = copia.querySelector('.cert-nome');
+            n.style.whiteSpace = 'nowrap';
+            const W = copia.getBoundingClientRect().width;
+            if (!W) return;
+            const esquerda = parseFloat(n.style.left);
+            const cx = Number.isFinite(esquerda) && String(n.style.left).endsWith('%') ? W * esquerda / 100 : W / 2;
+            const alinh = n.style.textAlign;
+            const margem = W * 0.03;
+            const limite = alinh === 'left' ? W - cx - margem : alinh === 'right' ? cx - margem : 2 * Math.min(cx, W - cx) - 2 * margem;
+            let tamanho = parseFloat(getComputedStyle(n).fontSize) || 40, voltas = 0;
+            while (n.scrollWidth > limite && tamanho > 9 && voltas < 60) { tamanho *= 0.95; n.style.fontSize = tamanho + 'px'; voltas++; }
+            nome.style.whiteSpace = 'nowrap';
+            if (voltas) nome.style.fontSize = tamanho + 'px';
+        });
+    } finally { caixa.remove(); }
 }
 
 // =========================================================
@@ -11702,22 +11756,37 @@ function criarPreviewCertificado(){
  const assets=dorsalDraftAssets||currentProva?.certAssetsEditor?.[certType];
  const logos=document.createElement('div');logos.className='cert-logos';(assets?.logos||window.certLogosData||[]).forEach(src=>{const img=document.createElement('img');img.src=src;logos.appendChild(img);});page.appendChild(logos);return page;
 }
+// Fundo de cada tipo de certificado na impressão:
+// o do editor (o que está a ser desenhado conta, mesmo antes de «Guardar o desenho»);
+// sem desenho próprio, o fundo antigo desse tipo e, para os lugares, o da participação.
+window.fundoCertificadoParaImprimir=function(tipo,tipoNoEditor=certType){
+ const proprio=(tipo===tipoNoEditor&&dorsalDraftAssets)||currentProva?.certAssetsEditor?.[tipo];
+ if(proprio)return proprio.background||null;
+ const antigo=tipo==='1'?(certBg1||certBgPart):tipo==='2'?(certBg2||certBgPart):tipo==='3'?(certBg3||certBgPart):certBgPart;
+ if(antigo)return antigo;
+ const participacao=(tipoNoEditor==='part'&&dorsalDraftAssets)||currentProva?.certAssetsEditor?.part;
+ return participacao?.background||null;
+};
+// Todas as folhas recebem o desenho do editor (o guardado ou, nos tipos ainda sem desenho, o desenho de base)
+// e o fundo do seu tipo. As folhas em branco só levam o fundo.
 window.aplicarEditorCertificadosImpressao=function(){
  const activeType=certType;
  try{document.querySelectorAll('#print-area .cert-page').forEach(page=>{
   certType=page.dataset.certType||'part';
-  if(!currentProva?.certLayoutsEditor?.[certType])return;
-  // Já aplicado antes de abrir a impressão: não se repete no «beforeprint» (o fundo já está carregado).
   if(page.dataset.cmEditorAplicado)return;page.dataset.cmEditorAplicado='1';
+  const fundo=window.fundoCertificadoParaImprimir(certType,activeType);
+  page.querySelector('.cert-bg')?.remove();
+  page.style.backgroundImage=fundo?'url("'+fundo+'")':'';
+  if(fundo)Object.assign(page.style,{backgroundSize:'cover',backgroundPosition:'center',backgroundRepeat:'no-repeat'});
+  if(page.dataset.branco)return;
   page.querySelector('.cert-footer br')?.remove();page.querySelector('.cert-details br')?.remove();
-  // Imprime o que a pré-visualização mostra: o fundo escolhido no editor conta mesmo antes de «Guardar o desenho».
-  const assets=(certType===activeType&&dorsalDraftAssets)||currentProva.certAssetsEditor?.[certType];
-  // O fundo ocupa a folha toda, como na pré-visualização do editor (sem margens nem repetições).
-  if(assets){page.querySelector('.cert-bg')?.remove();page.style.backgroundImage=assets.background?'url("'+assets.background+'")':'';if(assets.background)Object.assign(page.style,{backgroundSize:'cover',backgroundPosition:'center',backgroundRepeat:'no-repeat'});const logos=page.querySelector('.cert-logos');if(logos){logos.replaceChildren(...assets.logos.map(src=>{const img=document.createElement('img');img.src=src;return img;}));}}
-  aplicarEditorAoDorsal(page,layoutEditorDorsal(true));
+  const assets=(certType===activeType&&dorsalDraftAssets)||currentProva?.certAssetsEditor?.[certType];
+  const logos=page.querySelector('.cert-logos');
+  if(assets&&logos)logos.replaceChildren(...(assets.logos||[]).map(src=>{const img=document.createElement('img');img.src=src;return img;}));
+  // O tipo aberto no editor sai como a pré-visualização mostra; os outros com o desenho guardado (ou o de base).
+  aplicarEditorAoDorsal(page,layoutEditorDorsal(certType!==activeType));
  });}finally{certType=activeType;}
-};
-window.addEventListener('beforeprint',()=>{if(document.body.classList.contains('printing-certificados'))window.aplicarEditorCertificadosImpressao();});
+};window.addEventListener('beforeprint',()=>{if(document.body.classList.contains('printing-certificados'))window.aplicarEditorCertificadosImpressao();});
 
 const elementosDorsal={
  titulo:{label:'Título da prova',selector:'.cert-title',x:50,y:16,size:32,color:'#0f2b5c'},
