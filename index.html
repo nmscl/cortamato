@@ -2337,7 +2337,7 @@ window.CMEstudio=(()=>{
  let sigGaveta='';
  function atualizarGaveta(){
   if(!aberto)return;const k=separador,ms=modelos(),L=api().layout();
-  const sig=k+'|'+ed+'|'+(k==='modelos'?ms.map(m=>m.selectionId+':'+(m.revisao||0)).join(','):k==='camadas'?JSON.stringify(Object.entries(L).map(([q,d])=>[q,d.label,d.layer,d.visible,d.bloqueado]))+[...selecao().todos].join(','):k==='fundo'?String(window.logosData?.length)+'|'+String(window.certLogosData?.length)+'|'+(fundoActual()?'1':'0'):k==='elementos'?String(pagina(ed,L).v):'');
+  const sig=k+'|'+ed+'|'+(k==='modelos'?ms.map(m=>m.selectionId+':'+(m.revisao||0)).join(','):k==='camadas'?JSON.stringify(Object.entries(L).map(([q,d])=>[q,d.label,d.layer,d.visible,d.bloqueado]))+[...selecao().todos].join(','):k==='fundo'?String(window.logosData?.length)+'|'+String(window.certLogosData?.length)+'|'+(fundoActual()?'1':'0'):k==='elementos'?String(pagina(ed,L).v)+'|'+Object.entries(L).filter(([q,d])=>!d.type).map(([q,d])=>q+(d.visible===false?0:1)).join(','):'');
   if(sig===sigGaveta)return;sigGaveta=sig;
   const c={modelos:gavetaModelos,elementos:gavetaElementos,camadas:gavetaCamadas,fundo:gavetaFundo}[k];const foco=document.activeElement?.closest?.('.cme-gaveta')?document.activeElement.dataset.foco:null;ui.gaveta.replaceChildren(h('h3',{class:'cme-gt'},{modelos:'Modelos',elementos:'Elementos',camadas:'Camadas',fundo:ed==='consent'?'Fundo':'Fundo e logótipos'}[k]),c(L,ms));if(foco)$('[data-foco="'+foco+'"]',ui.gaveta)?.focus();
  }
@@ -2385,7 +2385,21 @@ window.CMEstudio=(()=>{
    const p=pagina(ed,L);
    c.append(h('p',{class:'cme-rotulo'},'Disposição rápida'),h('p',{class:'cme-nota'},'Reorganiza o número, o nome, o escalão e o QR. O fundo não muda.'),h('div',{class:'cme-disp'},(p.v?[['col','Em coluna']]:[['esq','QR à direita'],['dir','QR à esquerda'],['cen','Número ao centro']]).map(([k,r])=>h('button',{type:'button',class:'cme-dispb',on:{click:()=>disposicao(k)}},h('i',{class:'cme-dia d-'+k,'aria-hidden':'true'},h('b'),h('u'),h('s')),h('span',{},r)))));
   }
-  const ocultos=Object.entries(L).filter(([k,d])=>d.visible===false);
+  const autoCert=ed==='cert'?Object.entries(L).filter(([k,d])=>!d.type&&k!=='logos'):[];
+  if(autoCert.length){
+   c.append(h('p',{class:'cme-rotulo'},'Dados automáticos'),h('p',{class:'cme-nota'},'Escolha um a um os dados preenchidos em cada certificado. Cada um é um elemento próprio: pode movê-lo e mudar o tamanho, a letra e a cor.'),
+    h('div',{class:'cme-coluna cme-auto-cert'},autoCert.map(([k,d])=>{
+     const i=h('input',{type:'checkbox','data-foco':'auto-'+k});i.checked=d.visible!==false;
+     i.addEventListener('change',()=>{
+      api().atualizar(k,{visible:i.checked});
+      if(i.checked)api().selecionar(k,[k]);
+      else{const s=selecao();if(s.todos.has(k)||s.ativo===k){const resto=[...s.todos].filter(q=>q!==k);api().selecionar(resto[0]||'titulo',resto);}}
+      sigGaveta='';
+     });
+     return h('label',{class:'cme-chk'},i,h('span',{},d.label||k));
+    })));
+  }
+  const ocultos=Object.entries(L).filter(([k,d])=>d.visible===false&&!autoCert.some(([q])=>q===k));
   if(ocultos.length)c.append(h('p',{class:'cme-rotulo'},'Elementos retirados'),h('div',{class:'cme-coluna'},ocultos.map(([k,d])=>bt('Repor: '+(d.label||k),()=>{api().atualizar(k,{visible:true});api().selecionar(k,[k]);sigGaveta='';},'','mais'))));
   c.append(h('div',{class:'cme-so-rato'},h('p',{class:'cme-rotulo'},'Atalhos'),h('ul',{class:'cme-atalhos'},[['Shift + arrastar','só num eixo'],['Ctrl + arrastar','sem encaixe'],['Ctrl + D','duplicar'],['Ctrl + Z / Y','anular / refazer'],['Setas','mover 1 px (Shift: 10)'],['Ctrl + roda','zoom']].map(([a,b])=>h('li',{},h('kbd',{},a),h('span',{},b))))));
   return c;
@@ -5198,7 +5212,9 @@ body.printing-conferencia .dorsal-page,body.printing-conferencia .cert-page,body
 .cert-editavel .cert-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1}
 .cert-editavel .cert-logos img{max-width:140px;max-height:50px;object-fit:contain}
 .cert-apuramento{font-weight:900}
-@media print{.cert-editor-panel{display:none!important}.cert-editavel [data-editor-elemento]{outline:none!important}.printing-certificados .cert-page.cert-editavel{padding:0!important;border:0!important;border-radius:0!important}}
+@media print{.cert-editor-panel{display:none!important}.cert-editavel [data-editor-elemento]{outline:none!important}.printing-certificados .cert-page.cert-editavel{padding:0!important;border:0!important;border-radius:0!important}
+ /* A regra «background: white» das folhas de certificado repunha o tamanho do fundo: a imagem tem de cobrir a folha toda. */
+ body.printing-certificados #print-area .cert-page{background-size:cover!important;background-position:center!important;background-repeat:no-repeat!important}}
 </style><script id="cm-auto-data">
 function escutarDadosAutomaticosCM(referencia,receber,falhar){
     let desligar=null,ativo=false,parado=false,epoca=0,geracao=0,erroTimer=null,atraso=1000,leitura=null,ultimoPedido=0,ultimoServidor=Date.now();
@@ -6661,6 +6677,9 @@ const CMTextoConsentimento=(()=>{
 @media print{footer.credit-bar,.cmp-percurso,.cmp-toasts,.cmp-proximo,.cmp-pager,.cmp-passos,.cmp-cab{display:none!important}body.cmp{padding-bottom:0!important}}
 </style>
 <style media="print">.visual-sidebar,.visual-skip,.visual-actionbar,.visual-section-heading,.visual-tools-menu,.visual-reader-home{display:none!important}</style>
+<style id="cm-cert-campos">/* Dados automáticos dos certificados: só aparecem quando ligados no editor (estilo em linha). */
+.cert-campo{display:none}
+</style>
 </head>
 
 <body class="cm-visual visual-v2 visual-gestao cmp">
@@ -10816,8 +10835,25 @@ function atualizarBotoesCertificadosConcluidos() {
 }
 
 
-function imprimirCertificados(opcoes = {}) {
+// Dados automáticos dos certificados, cada um no seu elemento (escalão, ano, turma, lugar, tempo, dorsal...).
+// Vêm escondidos: aparecem quando são ligados no editor (Elementos > Dados automáticos).
+const CM_CAMPOS_CERT=[['campoEscalao','cert-campo-escalao'],['campoAno','cert-campo-ano'],['campoTurma','cert-campo-turma'],['campoAnoTurma','cert-campo-anoturma'],['campoLugar','cert-campo-lugar'],['campoTempo','cert-campo-tempo'],['campoDorsal','cert-campo-dorsal'],['campoEscolaAluno','cert-campo-escola'],['campoApuramento','cert-campo-apuramento']];
+function cmValoresCamposCert(r,pos,opc={}){
+    const ano=cmAnoNum(r?.ano),turma=String(r?.turma??'').replace(/^[º°ªᵃ\s]+/,'').replace(/[º°ªᵃ]/g,'').trim(),anoTxt=ano?cmAnoTexto(ano):'';
+    const tempo=!opc.soParticipa&&Number(r?.tempoProvaMs)>0?formatarTempo(r.tempoProvaMs):'';
+    return {campoEscalao:r?.escalaoNome||'',campoAno:anoTxt,campoTurma:turma,campoAnoTurma:(anoTxt+' '+turma).trim(),
+        campoLugar:!opc.soParticipa&&pos>0?pos+'.º lugar':'',campoTempo:tempo,
+        campoDorsal:r?.dorsal!=null&&String(r.dorsal)!==''?'Dorsal '+r.dorsal:'',campoEscolaAluno:r?.escola||'',
+        campoApuramento:!opc.soParticipa&&pos>0&&pos<=6&&typeof textoApuramentoCLDE==='function'?textoApuramentoCLDE(r,currentProva)||'':''};
+}
+function cmHtmlCamposCert(r,pos,opc){const v=cmValoresCamposCert(r,pos,opc);return CM_CAMPOS_CERT.map(([k,c])=>`<div class="cert-campo ${c}">${cmEsc(v[k])}</div>`).join('');}
+async function imprimirCertificados(opcoes = {}) {
     if (!assegurarAcessoProva()) return;
+    // Desenhos e fundos dos certificados que ainda só estão na nuvem são carregados antes de imprimir.
+    const refsCert = currentProva?._editorRefs || {};
+    if (['certAssetsEditor','certLayoutsEditor'].some(c => refsCert[c] && !Object.prototype.hasOwnProperty.call(currentProva, c)) && typeof carregarVisuaisSelecionadosCSV === 'function') {
+        try { await carregarVisuaisSelecionadosCSV(['certAssetsEditor','certLayoutsEditor']); } catch (erro) { console.error(erro); }
+    }
     if(!currentProva || !resultadosClassificacao(currentProva) || resultadosClassificacao(currentProva).length === 0) {
         alert("Não há resultados finais para gerar certificados."); return;
     }
@@ -10902,6 +10938,7 @@ function imprimirCertificados(opcoes = {}) {
                             <div class="cert-footer" style="margin-top: 25px; font-size: 14pt; color: #475569; font-weight: 600;">
                                 ${cmEsc(currentProva.nomeEscola || 'A Organização')} <br> <span class="cert-data" style="font-weight:normal; font-size:12pt; display:inline-block; margin-top:5px;">${dataFormatada}</span>
                             </div>
+                            ${cmHtmlCamposCert(r,pos,{soParticipa})}
                         </div>
                         <div class="cert-logos">${logosHtml}</div>
                     </div>
@@ -10913,7 +10950,16 @@ function imprimirCertificados(opcoes = {}) {
     if (!htmlPrint) { alert('Não há atletas elegíveis para o tipo de certificado selecionado.'); return; }
     printArea.innerHTML = htmlPrint;CMEstudio.nomesCertificados(printArea);
 
-    imprimirDocumentoCM('certificados');
+    // Os fundos dos certificados são aplicados e carregados ANTES de abrir a impressão:
+    // aplicados só no momento de imprimir, a impressão era feita antes de a imagem estar pronta e saía sem fundo.
+    try { window.aplicarEditorCertificadosImpressao?.(); } catch (erro) { console.error(erro); }
+    const fundos = new Set();
+    printArea.querySelectorAll('.cert-page').forEach(p => { const m = String(p.style.backgroundImage || '').match(/^url\(["']?([\s\S]*?)["']?\)$/); if (m && m[1]) fundos.add(m[1]); });
+    printArea.querySelectorAll('img.cert-bg').forEach(i => { if (i.src) fundos.add(i.src); });
+    const carregar = src => { const i = new Image(); i.src = src; return (i.decode ? i.decode() : new Promise((ok, falha) => { i.onload = ok; i.onerror = falha; })).catch(() => {}); };
+    Promise.race([Promise.all([...fundos].map(carregar)), new Promise(r => setTimeout(r, 8000))])
+        .then(() => new Promise(r => setTimeout(r, 80)))
+        .then(() => imprimirDocumentoCM('certificados'));
 }
 
 // =========================================================
@@ -11649,6 +11695,9 @@ function criarPreviewCertificado(){
  if(aluno.escalaoId==='adaptada'&&rank)action.textContent='Obteve o '+rank+'.º lugar na classificação conjunta da Prova Adaptada.';
  else if(certType==='part'&&rank>=4&&rank<=6){action.appendChild(document.createElement('br'));const place=document.createElement('b');place.textContent=rank+'º lugar no escalão.';action.appendChild(place);}
  if(rank>=1&&rank<=6){action.appendChild(document.createElement('br'));const qualification=document.createElement('strong');qualification.className='cert-apuramento';qualification.textContent=textoApuramentoCLDE(aluno,currentProva);action.appendChild(qualification);}
+ const exemplo={campoEscalao:'Infantis B',campoAno:'5º ano',campoTurma:'A',campoAnoTurma:'5º ano A',campoLugar:(certType==='part'?4:Number(certType))+'.º lugar',campoTempo:formatarTempo(754000),campoDorsal:'Dorsal 123',campoEscolaAluno:currentProva?.nomeEscola||'Escola do aluno',campoApuramento:'Apurado para a fase seguinte'};
+ const valores=cmValoresCamposCert(aluno,rank||(certType==='part'?4:Number(certType)),{soParticipa:typeof cmSemLugares==='function'&&cmSemLugares(aluno.escalaoId||aluno.escalaoNome||'')});
+ CM_CAMPOS_CERT.forEach(([k,c])=>append('cert-campo '+c,valores[k]||exemplo[k]));
  append('cert-footer',currentProva?.nomeEscola||'A Organização');append('cert-data',currentProva?.dataProva?currentProva.dataProva.split('-').reverse().join('/'):'___/___/____');
  const assets=dorsalDraftAssets||currentProva?.certAssetsEditor?.[certType];
  const logos=document.createElement('div');logos.className='cert-logos';(assets?.logos||window.certLogosData||[]).forEach(src=>{const img=document.createElement('img');img.src=src;logos.appendChild(img);});page.appendChild(logos);return page;
@@ -11658,9 +11707,13 @@ window.aplicarEditorCertificadosImpressao=function(){
  try{document.querySelectorAll('#print-area .cert-page').forEach(page=>{
   certType=page.dataset.certType||'part';
   if(!currentProva?.certLayoutsEditor?.[certType])return;
+  // Já aplicado antes de abrir a impressão: não se repete no «beforeprint» (o fundo já está carregado).
+  if(page.dataset.cmEditorAplicado)return;page.dataset.cmEditorAplicado='1';
   page.querySelector('.cert-footer br')?.remove();page.querySelector('.cert-details br')?.remove();
-  const assets=currentProva.certAssetsEditor?.[certType];
-  if(assets){page.querySelector('.cert-bg')?.remove();page.style.backgroundImage=assets.background?'url("'+assets.background+'")':'';const logos=page.querySelector('.cert-logos');if(logos){logos.replaceChildren(...assets.logos.map(src=>{const img=document.createElement('img');img.src=src;return img;}));}}
+  // Imprime o que a pré-visualização mostra: o fundo escolhido no editor conta mesmo antes de «Guardar o desenho».
+  const assets=(certType===activeType&&dorsalDraftAssets)||currentProva.certAssetsEditor?.[certType];
+  // O fundo ocupa a folha toda, como na pré-visualização do editor (sem margens nem repetições).
+  if(assets){page.querySelector('.cert-bg')?.remove();page.style.backgroundImage=assets.background?'url("'+assets.background+'")':'';if(assets.background)Object.assign(page.style,{backgroundSize:'cover',backgroundPosition:'center',backgroundRepeat:'no-repeat'});const logos=page.querySelector('.cert-logos');if(logos){logos.replaceChildren(...assets.logos.map(src=>{const img=document.createElement('img');img.src=src;return img;}));}}
   aplicarEditorAoDorsal(page,layoutEditorDorsal(true));
  });}finally{certType=activeType;}
 };
@@ -11671,11 +11724,21 @@ const elementosDorsal={
  subtitulo:{label:'Tipo de certificado',selector:'.cert-subtitle',x:50,y:25,size:18,color:'#444444'},
  introducao:{label:'Introdução',selector:'.cert-intro',x:50,y:36,size:16,color:'#64748b'},
  nome:{label:'Nome do aluno',selector:'.cert-nome',x:50,y:45,size:36,color:'#111111'},
- detalhes:{label:'Escalão e turma',selector:'.cert-details',x:50,y:56,size:16,color:'#333333'},
+ detalhes:{label:'Frase com escalão e turma',selector:'.cert-details',x:50,y:56,size:16,color:'#333333'},
  resultado:{label:'Resultado / classificação',selector:'.cert-action',x:50,y:65,size:16,color:'#333333'},
  assinatura:{label:'Escola / organização',selector:'.cert-footer',x:50,y:76,size:14,color:'#475569'},
  data:{label:'Data',selector:'.cert-data',x:50,y:82,size:12,color:'#475569'},
- logos:{label:'Logótipos',selector:'.cert-logos',x:50,y:92,size:100,color:'#000000'}
+ logos:{label:'Logótipos',selector:'.cert-logos',x:50,y:92,size:100,color:'#000000'},
+ // Dados automáticos em elementos separados: começam escondidos para não mudar os desenhos já feitos.
+ campoEscalao:{label:'Escalão',selector:'.cert-campo-escalao',x:30,y:58,size:18,color:'#333333',visible:false},
+ campoAno:{label:'Ano de escolaridade',selector:'.cert-campo-ano',x:50,y:58,size:18,color:'#333333',visible:false},
+ campoTurma:{label:'Turma',selector:'.cert-campo-turma',x:70,y:58,size:18,color:'#333333',visible:false},
+ campoAnoTurma:{label:'Ano e turma',selector:'.cert-campo-anoturma',x:50,y:62,size:18,color:'#333333',visible:false},
+ campoLugar:{label:'Lugar no escalão',selector:'.cert-campo-lugar',x:30,y:68,size:18,color:'#333333',visible:false},
+ campoTempo:{label:'Tempo',selector:'.cert-campo-tempo',x:50,y:68,size:18,color:'#333333',visible:false},
+ campoDorsal:{label:'Número do dorsal',selector:'.cert-campo-dorsal',x:70,y:68,size:18,color:'#333333',visible:false},
+ campoEscolaAluno:{label:'Escola do aluno',selector:'.cert-campo-escola',x:50,y:72,size:16,color:'#333333',visible:false},
+ campoApuramento:{label:'Apuramento (CLDE)',selector:'.cert-campo-apuramento',x:50,y:76,size:14,color:'#333333',visible:false}
 };
 let elementoDorsalSelecionado='titulo',dorsalEditorTimer=null,dorsalEditorFrame=null;
 let dorsalPickingColor=false;
@@ -11735,7 +11798,7 @@ function alternarSelecaoDorsal(key){
 }
 function layoutEditorDorsal(committed=false){
  const saved=committed?(currentProva?.certLayoutsEditor?.[certType]||{}):rascunhoEditorDorsal();
- const layout=Object.fromEntries(Object.entries(elementosDorsal).map(([key,def])=>[key,{...def,visible:true,font:'Arial, sans-serif',spacing:0,...saved[key]}]));
+ const layout=Object.fromEntries(Object.entries(elementosDorsal).map(([key,def])=>[key,{visible:true,font:'Arial, sans-serif',spacing:0,...def,...saved[key]}]));
  for(const [key,def] of Object.entries(saved))if(!elementosDorsal[key]&&def.type)layout[key]={font:'Arial, sans-serif',...def,...(def.type==='text'?{label:String(def.text||'').trim()||'Texto sem conteúdo'}:{}),selector:'[data-editor-elemento="'+key+'"]'};
  Object.values(layout).forEach((def,index)=>{if(!Number.isFinite(def.layer))def.layer=index+2;});
  return layout;
