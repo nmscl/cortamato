@@ -172,6 +172,53 @@ window.CMTermo=CMTermo;
 // Na gestão, a palavra segue a prova escolhida (também quando a prova muda ou chega da nuvem).
 setInterval(()=>{try{CMTermo.definir(typeof currentProva!=='undefined'&&currentProva?currentProva.termo:null);}catch(erro){}},700);
 
+// ---------- Nome dentro da caixa branca do fundo do certificado ----------
+// A imagem de fundo é lida (reduzida) e, à altura do nome, mede-se até onde vai a zona clara para cada lado.
+// O nome encaixa nessa caixa, com margem. Se o nome não estiver sobre uma zona clara, vale a largura da folha.
+const cmCaixasFundo=new Map();
+function cmPrepararCaixaNome(src){
+ if(!src)return Promise.resolve(null);
+ const ja=cmCaixasFundo.get(src);if(ja!==undefined)return Promise.resolve(ja);
+ const pedido=new Promise(ok=>{
+  const img=new Image();
+  img.onload=()=>{try{const w=900,h=Math.max(1,Math.round(img.naturalHeight*w/img.naturalWidth)),c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(img,0,0,w,h);const v={w,h,dados:g.getImageData(0,0,w,h).data};cmCaixasFundo.set(src,v);ok(v);}catch(erro){cmCaixasFundo.set(src,null);ok(null);}};
+  img.onerror=()=>{cmCaixasFundo.set(src,null);ok(null);};img.src=src;
+ });
+ cmCaixasFundo.set(src,pedido);return pedido;
+}
+const cmSrcFundo=el=>{if(!el)return null;const bg=el.style?.backgroundImage||getComputedStyle(el).backgroundImage||'';const m=String(bg).match(/^url\(["']?([\s\S]*?)["']?\)$/);return m?m[1]:null;};
+// Caixa clara à volta do ponto (x,y) da folha (frações de 0 a 1), em frações da largura da folha. A folha é A4 deitada e o fundo «cobre».
+function cmCaixaNome(src,xFr,yFr){
+ const v=cmCaixasFundo.get(src);if(!v||v instanceof Promise)return null;
+ const PW=297,PH=210,s=Math.max(PW/v.w,PH/v.h),ox=(PW-v.w*s)/2,oy=(PH-v.h*s)/2,d=v.dados;
+ const clara=(ix,iy)=>{if(ix<0||iy<0||ix>=v.w||iy>=v.h)return false;const k=(iy*v.w+ix)*4;return d[k]>205&&d[k+1]>205&&d[k+2]>205&&d[k+3]>200;};
+ const ix0=Math.round((xFr*PW-ox)/s);let melhor=null;
+ for(const dy of [-.012,0,.012]){
+  const iy=Math.round(((yFr+dy)*PH-oy)/s);if(!clara(ix0,iy))continue;
+  let a=ix0,b=ix0;while(clara(a-1,iy))a--;while(clara(b+1,iy))b++;
+  const esq=(a*s+ox)/PW,dir=((b+1)*s+ox)/PW;if(!melhor||dir-esq>melhor.dir-melhor.esq)melhor={esq,dir};
+ }
+ if(!melhor||melhor.dir-melhor.esq>=.995)return null; // se a «caixa» ocupa a folha toda, não há caixa
+ // Altura da caixa, medida na vertical do nome.
+ const iy0=Math.round((yFr*PH-oy)/s);
+ if(clara(ix0,iy0)){let c=iy0,b=iy0;while(clara(ix0,c-1))c--;while(clara(ix0,b+1))b++;melhor.cima=(c*s+oy)/PH;melhor.baixo=((b+1)*s+oy)/PH;}
+ return melhor;
+}
+// Tamanho máximo (px) da letra do nome para caber na altura da caixa, numa folha com H px de altura; null = sem caixa.
+window.cmTamanhoMaxNomeNaCaixa=function(folha,xFr,yFr,H){
+ const src=cmSrcFundo(folha);if(!src)return null;
+ const c=cmCaixaNome(src,xFr,yFr);if(!c||c.cima==null)return null;
+ const altura=(c.baixo-c.cima)*H;return altura<H*.9?Math.max(8,altura*.62):null;
+};
+// Largura (px) que o nome pode ocupar dentro da caixa, numa folha com W px de largura; null = sem caixa.
+window.cmLimiteNomeNaCaixa=function(folha,xFr,yFr,W,alinhamento){
+ const src=cmSrcFundo(folha);if(!src)return null;
+ const c=cmCaixaNome(src,xFr,yFr);if(!c)return null;
+ const x=xFr*W,esq=c.esq*W,dir=c.dir*W,margem=Math.max(W*.012,(dir-esq)*.04);
+ return Math.max(24,alinhamento==='left'?dir-x-margem:alinhamento==='right'?x-esq-margem:2*Math.min(x-esq,dir-x)-2*margem);
+};
+window.cmPrepararCaixaNome=cmPrepararCaixaNome;window.cmSrcFundo=cmSrcFundo;
+
 // ---------- Gravação local ----------
 // A cópia completa da gestão (com as imagens dos desenhos) fica no IndexedDB, que tem espaço de sobra.
 // No localStorage (cerca de 5 MB) fica só uma cópia leve, igual à que vai para a nuvem, sem as imagens grandes:
@@ -2048,16 +2095,25 @@ window.CMEstudio=(()=>{
  function encaixarNome(el,letras,limite,maius,espaco=0){
   const completo=el.dataset.nomeCompleto??(el.dataset.nomeCompleto=el.textContent.trim());
   const largura=t=>Math.max(...letras.map(f=>{reguaNome.font=f;return reguaNome.measureText(maius?t.toLocaleUpperCase('pt'):t).width;}))+espaco*[...t].length;
-  const versoes=versoesNome(completo),v=versoes.find(x=>largura(x)<=limite)??versoes.at(-1);
+  // O nome completo é preferido: só se abrevia quando nem reduzido até ~70% do tamanho cabe.
+  const versoes=versoesNome(completo),v=versoes.find(x=>largura(x)*.72<=limite)??versoes.at(-1);
   if(el.textContent!==v)el.textContent=v;
   return Math.min(1,limite/largura(v));
  }
  function nomeNoEditor(el,def){
   if(!el||!def||def.visible===false)return;
-  const W=CFG.cert.px.w,x=(parseFloat(el.style.left)||def.x)/100*W,m=W*.02,limite=def.alinhamento==='left'?W-x-m:def.alinhamento==='right'?x-m:2*Math.min(x,W-x)-2*m;
+  const W=CFG.cert.px.w,x=(parseFloat(el.style.left)||def.x)/100*W,m=W*.02;
+  let limite=def.alinhamento==='left'?W-x-m:def.alinhamento==='right'?x-m:2*Math.min(x,W-x)-2*m;
+  // Se o fundo tiver uma caixa branca onde está o nome, o nome não sai dela.
+  const folha=el.closest('.cert-page')||el.parentElement,src=window.cmSrcFundo?.(folha),yFr=(parseFloat(el.style.top)||def.y)/100;
+  if(src){const naCaixa=window.cmLimiteNomeNaCaixa(folha,x/W,yFr,W,def.alinhamento);if(naCaixa)limite=Math.min(limite,naCaixa);else if(!el.dataset.cmCaixaPedida){el.dataset.cmCaixaPedida='1';window.cmPrepararCaixaNome(src).then(v=>{if(v&&el.isConnected)nomeNoEditor(el,def);});}}
   const k=encaixarNome(el,[(def.italico?'italic ':'')+(def.peso||900)+' '+def.size*96/72+'px '+(def.font||'Arial, sans-serif')],limite,def.caixa==='uppercase',def.spacing||0);
   el.style.width='auto'; // a folha de impressão antiga fixava 85% e o texto maior que isso saía descentrado
-  if(k<1)el.style.fontSize=def.size*k+'pt';
+  let tam=def.size*k;
+  // Também na altura: a letra não passa de ~60% da altura da caixa branca.
+  const maxPx=src?window.cmTamanhoMaxNomeNaCaixa?.(folha,x/W,yFr,CFG.cert.px.h):null;
+  if(maxPx&&tam*96/72>maxPx)tam=maxPx*72/96;
+  if(tam<def.size)el.style.fontSize=tam+'pt';
  }
  // Certificados ainda sem desenho aplicado: saem com a folha antiga, em que o nome tem 187 mm a 40 pt.
  function nomesCertificados(area){
@@ -10974,6 +11030,8 @@ async function imprimirCertificados(opcoes = {}) {
 async function imprimirFolhasCertificados() {
     const printArea = document.getElementById('print-area');
     try { await Promise.race([document.fonts?.ready, new Promise(r => setTimeout(r, 4000))]); } catch (erro) {}
+    // Caixas brancas dos fundos medidas antes de encaixar os nomes.
+    try { await Promise.race([Promise.all(['part', '1', '2', '3'].map(t => window.cmPrepararCaixaNome?.(window.fundoCertificadoParaImprimir?.(t)))), new Promise(r => setTimeout(r, 5000))]); } catch (erro) {}
     try { window.aplicarEditorCertificadosImpressao?.(); } catch (erro) { console.error(erro); }
     try { await Promise.race([document.fonts?.ready, new Promise(r => setTimeout(r, 4000))]); } catch (erro) {}
     try { encaixarNomesCertificadosImpressao(printArea); } catch (erro) { console.error(erro); }
@@ -11007,8 +11065,14 @@ function encaixarNomesCertificadosImpressao(area) {
             const cx = Number.isFinite(esquerda) && String(n.style.left).endsWith('%') ? W * esquerda / 100 : W / 2;
             const alinh = n.style.textAlign;
             const margem = W * 0.03;
-            const limite = alinh === 'left' ? W - cx - margem : alinh === 'right' ? cx - margem : 2 * Math.min(cx, W - cx) - 2 * margem;
+            let limite = alinh === 'left' ? W - cx - margem : alinh === 'right' ? cx - margem : 2 * Math.min(cx, W - cx) - 2 * margem;
+            // Com uma caixa branca no fundo, o nome fica dentro dela.
+            const topo = parseFloat(n.style.top), yFr = Number.isFinite(topo) && String(n.style.top).endsWith('%') ? topo / 100 : 0.45;
+            const naCaixa = window.cmLimiteNomeNaCaixa?.(page, cx / W, yFr, W, alinh === 'left' || alinh === 'right' ? alinh : 'center');
+            if (naCaixa) limite = Math.min(limite, naCaixa);
             let tamanho = parseFloat(getComputedStyle(n).fontSize) || 40, voltas = 0;
+            const H = copia.getBoundingClientRect().height, maxPx = window.cmTamanhoMaxNomeNaCaixa?.(page, cx / W, yFr, H);
+            if (maxPx && tamanho > maxPx) { tamanho = maxPx; n.style.fontSize = tamanho + 'px'; voltas++; }
             while (n.scrollWidth > limite && tamanho > 9 && voltas < 60) { tamanho *= 0.95; n.style.fontSize = tamanho + 'px'; voltas++; }
             nome.style.whiteSpace = 'nowrap';
             if (voltas) nome.style.fontSize = tamanho + 'px';
