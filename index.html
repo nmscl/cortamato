@@ -127,7 +127,24 @@ function cmDadosIlegiveis(texto){
 }
 
 // ---------- Numeração ----------
+function cmMostrarModoNumeracao(){
+ const processo=document.getElementById('modo-numeracao').value==='processo';
+ for(const id of ['dorsal-inicial','digitos-dorsal'])document.getElementById(id).disabled=processo;
+}
+function cmValidarProcessosDorsais(alunos){
+ const ocupados=new Map();
+ for(const aluno of alunos){
+  if(aluno.voluntario)continue;
+  const id=String(aluno.processo??'').trim(),chave=id.replace(/^0+/,'');
+  if(!/^\d+$/.test(id)||!chave||!Number.isSafeInteger(Number(id)))return 'Indique um número de processo válido para '+aluno.nome+'.';
+  if(ocupados.has(chave))return 'O processo '+id+' está repetido em '+ocupados.get(chave)+' e '+aluno.nome+'.';
+  ocupados.set(chave,aluno.nome);
+ }
+ return '';
+}
 function cmReporNumeracao(){
+ document.getElementById('modo-numeracao').value=currentProva?.modoNumeracao||'sequencial';cmMostrarModoNumeracao();
+ if(currentProva?.modoNumeracao==='processo'){window.cmNumeracaoEstado?.(false);return;}
  const dorsais=(currentProva?.participantes||[]).map(a=>String(a.dorsal??'').trim()).filter(d=>/^\d+$/.test(d));if(!dorsais.length)return;
  document.getElementById('dorsal-inicial').value=Math.min(...dorsais.map(Number));
  document.getElementById('digitos-dorsal').value=Math.min(...dorsais.map(d=>d.length));
@@ -139,8 +156,11 @@ function cmAplicarNumeracao(){
  if(!Number.isInteger(vIni)||vIni<1){alert('O dorsal inicial tem de ser um número inteiro, de 1 para cima.');ini.focus();return;}
  if(!Number.isInteger(vDig)||vDig<1||vDig>6){alert('Os dígitos do dorsal têm de ser um número de 1 a 6.');dig.focus();return;}
  const chegadas=(currentProva.resultados||[]).length,partidas=Object.values(currentProva.escaloesConfig||{}).filter(c=>c.horaArranqueMs).length;
- if(chegadas||partidas){alert('Não é possível renumerar: esta prova já tem '+chegadas+' chegada(s) e '+partidas+' partida(s) dada(s), que deixariam de corresponder aos alunos.\n\nReinicie as corridas em Dia da prova › Partidas e volte a tentar.');cmReporNumeracao();return;}
+ if(chegadas||partidas||currentProva.participantes?.some(a=>a.scans?.length)){alert('Não é possível renumerar: esta prova já tem '+chegadas+' chegada(s) e '+partidas+' partida(s) dada(s), que deixariam de corresponder aos alunos.\n\nReinicie as corridas em Dia da prova › Partidas e volte a tentar.');cmReporNumeracao();return;}
  if((currentProva.participantes||[]).some(a=>a.dorsal)&&!confirm('Renumerar os dorsais de todos os alunos?\n\nOs dorsais já impressos deixam de corresponder e têm de ser impressos de novo.')){cmReporNumeracao();return;}
+ const modo=document.getElementById('modo-numeracao').value;
+ if(modo==='processo'){const erro=cmValidarProcessosDorsais(currentProva.participantes||[]);if(erro){alert(erro);return;}}
+ currentProva.modoNumeracao=modo;
  gerarNumeracaoDorsais();gerarDorsaisParaImpressao();window.cmNumeracaoEstado?.(false);
 }
 
@@ -170,7 +190,7 @@ function cmLimparCorridas(prova){
 // ---------- Corridas ----------
 function cmFaltamNaCorrida(k){
  const membros=membrosGrupoCorrida(k);
- return (currentProva?.participantes||[]).filter(a=>a.ativo&&!a.voluntario&&membros.includes(a.escalaoId)&&!(currentProva.resultados||[]).some(r=>String(r.dorsal)===String(a.dorsal))).length;
+ return (currentProva?.participantes||[]).filter(a=>a.ativo!==false&&!a.voluntario&&membros.includes(a.escalaoId)&&!(currentProva.resultados||[]).some(r=>String(r.dorsal)===String(a.dorsal))).length;
 }
 function cmJaRegistado(a){
  const box=document.getElementById('live-feed-box'),txt=document.getElementById('live-feed-text');
@@ -394,7 +414,7 @@ window.CMDocs=(()=>{
    return [{secao:'',linhas:alunos.map(linha)}];
   },
   classificacoes(p,o){
-   const validos=(resultadosClassificacao(p)||[]).filter(r=>{const t=String(r.escalaoId||'').toLowerCase()+' '+String(r.escalaoNome||'').toLowerCase();return !t.includes('adaptada')&&!t.includes('nee');});
+   const validos=resultadosClassificacao(p);
    const g=new Map();validos.forEach(r=>{const k=r.escalaoNome||'Geral';if(!g.has(k))g.set(k,[]);g.get(k).push(r);});
    return [...g.entries()].filter(([k])=>!o.escalao||k===o.escalao).map(([secao,l])=>({secao,vars:{escalao:secao},linhas:l.sort((a,b)=>getPesoEscalao(a)-getPesoEscalao(b)||a.tempoProvaMs-b.tempoProvaMs).map((r,i)=>linhaResultado(r,i+1,r.desistencia||r.desqualificado?'':['cmd-ouro','cmd-prata','cmd-bronze'][i]||''))}));
   },
@@ -558,7 +578,7 @@ window.CMDocs=(()=>{
 
  /* ---------- Imprimir ---------- */
  const MARCA={consent:'autorizacoes',dorsal:'dorsais',cert:'certificados',entrega:'entrega',confirmacao:'confirmacao',ciclos:'ciclos',classificacoes:'classificacoes',turma:'turma',podio:'podio',faltas:'faltas'};
- const SEM_DADOS={ciclos:'Não há participantes com dorsal ativo nesta seleção.',confirmacao:'Não há alunos marcados com Prova Adaptada, limitações funcionais ou voluntário nesta seleção.',entrega:'Não há alunos ativos para imprimir.',classificacoes:'Não há resultados elegíveis para imprimir (excluindo Prova Adaptada).',turma:'Não há resultados para imprimir.',podio:'Não há alunos com turma e classificação válida para calcular o pódio.',faltas:'Não há alunos com participação registada nesta seleção.'};
+ const SEM_DADOS={ciclos:'Não há participantes com dorsal ativo nesta seleção.',confirmacao:'Não há alunos marcados com Prova Adaptada, limitações funcionais ou voluntário nesta seleção.',entrega:'Não há alunos ativos para imprimir.',classificacoes:'Não há resultados para imprimir.',turma:'Não há resultados para imprimir.',podio:'Não há alunos com turma e classificação válida para calcular o pódio.',faltas:'Não há alunos com participação registada nesta seleção.'};
  async function imprimirDoc(id,o={}){
   if(!assegurarAcessoProva())return;
   try{await carregarVisuaisSelecionadosCSV(['doc_'+id]);}catch(e){}
@@ -617,8 +637,12 @@ window.CMDocs=(()=>{
   faltas(mudou){const c=campoLista('Turma',[['','Todas as turmas com participantes'],...turmasDe((currentProva.participantes||[]).filter(a=>a.ano&&a.turma))],mudou),ler=()=>({turma:c.s.value});return {campos:[c.no,h('button',{type:'button',class:'btn btn-secondary cmd-email',on:{click:()=>{$('.cmd-dlg')?.close();window.abrirModalTurmaDT();}}},'Enviar por email ao Diretor de Turma')],resumo:()=>plural(contarPaginas('faltas',ler()),'página','páginas'),vazio:()=>!secoes('faltas',ler()).length,imprimir:()=>imprimirDoc('faltas',ler())};},
   cert(mudou){
    const sel=$('#cert-tipo'),grupo=sel.closest('.input-group'),area=$('.cert-concluidos-area'),casa=grupo.parentElement,casaA=area.parentElement;window.atualizarBotoesCertificadosConcluidos?.();
-   // Conta como a impressão: pódio são os três primeiros de cada escalão, e a Prova Adaptada tem certificado próprio.
-   const contar=()=>{const tipo=sel.value||'todos',grupos={};resultadosClassificacao(currentProva).filter(r=>!r.desistencia&&!r.desqualificado).forEach(r=>{(grupos[r.escalaoId||r.escalaoNome||'Geral']||(grupos[r.escalaoId||r.escalaoNome||'Geral']=[])).push(r);});let n=0;Object.values(grupos).forEach(l=>l.sort((a,b)=>a.tempoProvaMs-b.tempoProvaMs).forEach((r,i)=>{const cat=resultadoNEE(r)&&!temLimitacoesFuncionais(r)?'nee':i<3?'classificacao':'participacao';if(tipo==='todos'||tipo===cat)n++;}));return n;};
+   const contar=()=>{
+    const grupos=agruparRelatorio(resultadosClassificacao(currentProva).filter(resultadoValidoParaCertificado),r=>r.escalaoId||r.escalaoNome||'Geral');
+    let n=0;
+    for(const grupo of grupos.values())grupo.sort((a,b)=>a.tempoProvaMs-b.tempoProvaMs).forEach((r,i)=>{if(incluirNoLoteCertificados(sel.value||'todos',r,i+1))n++;});
+    return n;
+   };
    sel.addEventListener('change',mudou);
    return {campos:[grupo,area],resumo:()=>plural(contar(),'certificado','certificados'),vazio:()=>!contar(),imprimir:()=>window.imprimirCertificados(),fechar(){sel.removeEventListener('change',mudou);casa.append(grupo);casaA.append(area);}};
   }
@@ -635,6 +659,376 @@ window.CMDocs=(()=>{
  }
 
  /* ---------- A área Documentos ---------- */
+ // Relatório da prova: os números são calculados no momento em que a organização gera o documento.
+ const criteriosRelatorio=[
+  ['organizacao','Organização e logística'],
+  ['percurso','Percurso e segurança'],
+  ['apoio','Apoio dos voluntários']
+ ];
+ const balancoGeral={
+  excelente:'decorreu muito bem',bom:'decorreu bem',satisfatorio:'decorreu de forma satisfatória',
+  dificil:'decorreu com dificuldades',insuficiente:'decorreu com dificuldades significativas'
+ };
+ function identidadeRelatorio(aluno){
+  const bib=String(aluno.dorsal??'').trim();
+  if(bib)return 'd:'+(/^\d+$/.test(bib)?bib.replace(/^0+(?=\d)/,''):bib);
+  const processo=String(aluno.processo??'').trim();
+  if(processo&&!/^(?:N\/A|—|-)$/i.test(processo))return 'p:'+processo;
+  return aluno;
+ }
+ function agruparRelatorio(linhas,chave){
+  const grupos=new Map();
+  for(const linha of linhas){
+   const k=chave(linha);
+   if(!grupos.has(k))grupos.set(k,[]);
+   grupos.get(k).push(linha);
+  }
+  return grupos;
+ }
+ function totaisRelatorio(linhas){
+  const t={inscritos:0,voluntarios:0,ativos:0,presentesInscritos:0,participaram:0,classificados:0,
+   desistencias:0,desclassificacoes:0,parciais:0,porValidar:0};
+  for(const l of linhas){
+   if(l.aluno){
+    t.inscritos++;
+    if(l.aluno.voluntario)t.voluntarios++;
+    else if(l.aluno.ativo!==false)t.ativos++;
+   }
+   if(l.estado){t.participaram++;t[l.estado]++;if(l.aluno)t.presentesInscritos++;}
+  }
+  t.atletas=t.inscritos-t.voluntarios;
+  return t;
+ }
+ function escolaridadeRelatorio(principal,reserva){
+  const ler=k=>String(principal?.[k]??'').trim()||String(reserva?.[k]??'').trim();
+  const anoOrigem=ler('ano'),turmaOrigem=ler('turma');
+  const {ano,turma}=dadosEscolaridadeTurmaDorsais({ano:anoOrigem,turma:turmaOrigem});
+  const especial=/[a-zá-ú]/i.test(anoOrigem.replace(/ano/ig,''));
+  const equivalente=cmAnoEquivalente(anoOrigem);
+  const profissional=ano>=1&&ano<=3&&(equivalente===ano+9||/profissional/i.test(anoOrigem)||(!especial&&equivalente===null));
+  if(profissional)return {ano:ano+'.º ano do ensino profissional',turma,profissional:true};
+  return {ano:especial?anoOrigem:ano?ano+'.º ano':'Ano por indicar',turma};
+ }
+ function categoriaRelatorio(p,a,r){
+  const base=r||projetarClassificacao(p,a);
+  let id=base.escalaoId||base.escalaoNome||'semEscalao',nome=p.escaloesConfig?.[id]?.nome||base.escalaoNome||'Escalão por indicar',tipo='regular';
+  if(pertenceAProvaAdaptada(base)){id='adaptada';nome='Prova Adaptada';tipo='adaptada';}
+  else if(temLimitacoesFuncionais(base)||String(id).startsWith('alf_'))tipo='lf';
+  let pista=base.escalaoCorridaId||(p.escaloesConfig?.[base.escalaoId]?base.escalaoId:a?.escalaoId)||base.escalaoId||'';
+  if(!p.escaloesConfig?.[pista]&&tipo==='adaptada'&&p.escaloesConfig?.adaptada)pista='adaptada';
+  return {id,nome,tipo,pista};
+ }
+ function prepararLinhasRelatorio(p){
+  const inscritos=p.participantes||[],porDorsal=agruparRelatorio(inscritos.filter(a=>String(a.dorsal??'').trim()),identidadeRelatorio);
+  const processo=a=>String(a.processo??'').trim();
+  const porProcesso=agruparRelatorio(inscritos.filter(a=>processo(a)&&!/^N\/A$|^—$|^-$/i.test(processo(a))),processo);
+  const resultados=new Map();
+  for(const r of resultadosClassificacao(p)){
+   const id=identidadeRelatorio(r),proc=processo(r),temProcesso=!!proc&&!/^N\/A$|^—$|^-$/i.test(proc);
+   const candidatos=(porDorsal.get(id)||[]).filter(a=>!temProcesso||!processo(a)||processo(a)===proc);
+   const processoUnico=porProcesso.get(proc);
+   const a=candidatos.length===1?candidatos[0]:processoUnico?.length===1?processoUnico[0]:null;
+   if(a?.voluntario)continue;
+   const key=a||(typeof id==='string'?JSON.stringify([id,temProcesso?proc:'']):id),anterior=resultados.get(key);
+   if(!anterior||Number(r.chegadaMs||0)>=Number(anterior.chegadaMs||0))resultados.set(key,r);
+  }
+  function linha(aluno,r){
+   const estado=r?(r.desqualificado?'desclassificacoes':r.desistencia?'desistencias':resultadoValidoParaCertificado(r)?'classificados':'porValidar'):
+    !aluno.voluntario&&aluno.scans?.length?'parciais':null;
+   const escola=escolaridadeRelatorio(aluno,r);
+   return {aluno,r,estado,escola,genero:cmGeneroImportado(aluno?.genero)||cmGeneroImportado(r?.genero)||'',
+    ciclo:escola.profissional?'sec':cicloDoAluno(aluno||r),categoria:aluno?.voluntario?null:categoriaRelatorio(p,aluno,r)};
+  }
+  const linhas=inscritos.map(a=>{const r=resultados.get(a);resultados.delete(a);return linha(a,r);});
+  for(const r of resultados.values())linhas.push(linha(null,r));
+  return linhas;
+ }
+ function consentimentosRelatorio(p,alunos=p.participantes||[]){
+  const t={abrangidos:0,fora:0,sim:0,nao:0,pendentes:0,automaticos:0,reativados:0};
+  for(const a of alunos){
+   if(!alunoEmCicloObrigatorio(a,p)){t.fora++;continue;}
+   t.abrangidos++;
+   const id=a.consentimentoId,reg=id&&(p.consentimentos?.[id]||p.consentimentosLimpos?.[id])?
+    cmRegistoConsentimentoVigente(p,id):a.consentimento;
+   if(!['SIM','NAO'].includes(reg?.resposta)){t.pendentes++;continue;}
+   if(reg.resposta==='SIM')t.sim++;else t.nao++;
+   if(reg.automaticoPrazo)t.automaticos++;
+   if(reg.resposta==='NAO'&&reg.reativacaoGestao?.ativo)t.reativados++;
+  }
+  return t;
+ }
+ function classificacoesRelatorio(linhas){
+  const grupos=agruparRelatorio(linhas.filter(l=>l.categoria),l=>l.categoria.id);
+  return [...grupos.values()].map(grupo=>{
+   const {id,nome,tipo}=grupo[0].categoria;
+   const validos=grupo.filter(l=>l.estado==='classificados').sort((a,b)=>Number(a.r.tempoProvaMs)-Number(b.r.tempoProvaMs));
+   const equipas=validos.map(l=>{
+    const escolar=escolaridadeRelatorio(l.r,l.aluno);
+    return {escalaoId:id,escalaoNome:nome,ano:escolar.ano==='Ano por indicar'?'':escolar.ano,turma:escolar.turma,tempoProvaMs:l.r.tempoProvaMs};
+   });
+   const turmas=calcularPodioTurmas(equipas,[])[0]?.turmas.filter(t=>t.lugar<=3)||[];
+   for(const turma of turmas){
+    const r=turma.alunos[0].resultado;
+    if(r.ano.endsWith(' do ensino profissional'))turma.nome=r.ano+' '+r.turma;
+   }
+   return {id,nome,tipo,validos,turmas,totais:totaisRelatorio(grupo)};
+  }).sort((a,b)=>getOrdemEscalao(String(a.id))-getOrdemEscalao(String(b.id))||ordenarTxt(a.nome,b.nome));
+ }
+ function identificacaoClassificado(l){
+  const r=l.r,escola=escolaridadeRelatorio(r,l.aluno);
+  return (r.nome||l.aluno?.nome||(r.dorsal?'Dorsal '+r.dorsal:'Atleta sem nome registado'))+
+   ' ('+(escola.ano==='Ano por indicar'?'ano por indicar':escola.ano)+', '+(escola.turma?'turma '+escola.turma:'turma por indicar')+')';
+ }
+ function graficoRelatorio(titulo,series,total,legenda){
+  const figura=h('figure',{class:'cm-balanco-grafico'},h('figcaption',{},titulo));
+  for(const [nome,valor] of series){
+   const percentagem=total?valor*100/total:0;
+   const barra=h('span',{class:'cm-balanco-barra','aria-hidden':'true'},h('i',{style:'width:'+percentagem+'%'}));
+   const proporcao=total?' · '+percentagem.toLocaleString('pt-PT',{maximumFractionDigits:1})+'%':'';
+   figura.append(h('div',{class:'cm-balanco-serie'},h('span',{},nome),barra,h('strong',{},String(valor)+proporcao)));
+  }
+  figura.append(h('small',{},legenda));return figura;
+ }
+ function folhaRelatorio(p,avaliacao){
+  const linhas=prepararLinhasRelatorio(p),d=totaisRelatorio(linhas),categorias=classificacoesRelatorio(linhas);
+  const atletas=linhas.filter(l=>l.aluno&&!l.aluno.voluntario),ativos=atletas.filter(l=>l.aluno.ativo!==false);
+  const presentes=linhas.filter(l=>l.estado),c=consentimentosRelatorio(p);
+  const enumerar=new Intl.ListFormat('pt-PT',{style:'long',type:'conjunction'});
+  const lista=itens=>enumerar.format(itens.filter(Boolean));
+  const numero=(n,f=false)=>n===1?(f?'uma':'um'):n===2?(f?'duas':'dois'):['','','','três','quatro','cinco','seis','sete','oito','nove'][n]||String(n);
+  const contar=(n,sing,plur,f=false)=>numero(n,f)+' '+(n===1?sing:plur);
+  const inicial=t=>t.charAt(0).toLocaleUpperCase('pt-PT')+t.slice(1);
+  const pct=(parte,total)=>(parte/total).toLocaleString('pt-PT',{style:'percent',maximumFractionDigits:1});
+  const f=h('article',{class:'cm-balanco-folha'}),paragrafo=t=>f.append(h('p',{},t));
+  const est=estilo();f.style.fontFamily=letra(est.letra);f.style.setProperty('--cor-relatorio',est.cor);
+  const nome=p.nome||p.tituloDorsal||'Corta-Mato escolar',dia=interpretarDataAtividade(p.dataProva);
+  const data=dia?new Date(dia.ano,dia.mes-1,dia.dia).toLocaleDateString('pt-PT',{dateStyle:'long'}):'';
+  const escolaAno=[p.nomeEscola,p.anoLetivo&&'Ano letivo '+p.anoLetivo].filter(Boolean).join(' · ');
+  f.append(h('header',{class:'cm-balanco-cabecalho'},
+   h('div',{},h('h1',{},'Relatório da prova'),h('p',{class:'cm-balanco-nome'},nome),escolaAno&&h('p',{class:'cm-balanco-escola'},escolaAno)),
+   data&&h('time',{datetime:p.dataProva},data)));
+
+  const turmas=new Set(atletas.filter(l=>l.escola.turma).map(l=>JSON.stringify([l.escola.ano,l.escola.turma])));
+  const porCiclo=agruparRelatorio(presentes,l=>l.ciclo);
+  const ciclos=CICLOS_ESCOLARES.filter(g=>g.id!=='sem'&&porCiclo.has(g.id));
+  const nomeCiclo=g=>g.nome==='Secundário'?'ensino secundário':g.nome.toLocaleLowerCase('pt-PT');
+  const semCiclo=porCiclo.get('sem')?.length||0;
+  const genero=agruparRelatorio(presentes,l=>l.genero);
+  const idades=atletas.map(l=>p.dataProva?calcularIdadeNaAtividade(l.aluno.data,p.dataProva):null).filter(Number.isFinite);
+  const numerados=ativos.filter(l=>cmDorsalValido(l.aluno.dorsal)).length;
+  let abertura;
+  if(d.atletas){
+   const origens=turmas.size&&atletas.every(l=>l.escola.turma)?' de '+contar(turmas.size,'turma','turmas',true):'';
+   abertura='Nesta edição do corta-mato, '+contar(d.atletas,'aluno','alunos')+origens+(d.atletas===1?' inscreveu-se':' inscreveram-se')+' para correr.';
+   if(idades.length){
+    const min=idades.reduce((a,b)=>Math.min(a,b)),max=idades.reduce((a,b)=>Math.max(a,b));
+    if(min!==max)abertura+=' '+(idades.length===atletas.length?'As idades dos inscritos':'As idades conhecidas')+' iam dos '+min+' aos '+max+' anos no dia da atividade.';
+   }
+   if(d.voluntarios)abertura+=d.voluntarios===1?' Houve ainda um aluno que escolheu participar como voluntário.':' Outros '+contar(d.voluntarios,'aluno','alunos')+' escolheram participar como voluntários.';
+  }else abertura=d.voluntarios?'O voluntariado reuniu '+contar(d.voluntarios,'inscrição','inscrições',true)+'. Ainda não há inscrições de atletas.':'Ainda não há inscrições de atletas ou de voluntários para esta edição.';
+  paragrafo(abertura);
+  if(c.sim||c.nao||numerados){
+   const preparacao=[];
+   if(c.sim||c.nao){
+    preparacao.push('Na preparação das partidas, contabilizámos '+lista([c.sim&&contar(c.sim,'autorização','autorizações',true),c.nao&&contar(c.nao,'recusa','recusas',true)])+' para a participação dos alunos'+(c.automaticos?', incluindo '+contar(c.automaticos,'decisão automática','decisões automáticas',true)+' no termo do prazo':'')+'.');
+    if(c.pendentes)preparacao.push('À data deste balanço, faltava conhecer a decisão relativa a '+contar(c.pendentes,'aluno','alunos')+'.');
+    if(c.reativados)preparacao.push('Depois de uma recusa inicial, '+contar(c.reativados,'inscrição foi reativada','inscrições foram reativadas',true)+'.');
+   }
+   if(numerados)preparacao.push(numerados===ativos.length?'Cada atleta com inscrição ativa tinha o seu dorsal.':'Dos '+ativos.length+' atletas com inscrição ativa, '+numero(numerados)+(numerados===1?' tinha':' tinham')+' dorsal atribuído.');
+   paragrafo(preparacao.join(' '));
+  }
+
+  if(d.participaram){
+   let presenca;
+   if(d.atletas&&d.presentesInscritos===d.atletas)presenca=d.atletas===1?'O aluno inscrito participou na prova.':'No dia da prova, todos os alunos inscritos para correr passaram pela pista.';
+   else if(d.presentesInscritos)presenca='Dos '+d.atletas+' alunos inscritos para correr, '+numero(d.presentesInscritos)+(d.presentesInscritos===1?' esteve':' estiveram')+' na pista ('+pct(d.presentesInscritos,d.atletas)+').';
+   else presenca='Os controlos do percurso e da meta confirmam a participação de '+contar(d.participaram,'atleta','atletas')+'.';
+   const extra=d.participaram-d.presentesInscritos;
+   if(extra&&d.presentesInscritos)presenca+=' A estes juntou-se '+(extra===1?'um participante':'um grupo de '+extra+' participantes')+' sem inscrição identificada.';
+   if(ciclos.length){
+    const maior=Math.max(...ciclos.map(g=>porCiclo.get(g.id).length)),lideres=ciclos.filter(g=>porCiclo.get(g.id).length===maior);
+    if(ciclos.length===1)presenca+=' O '+nomeCiclo(ciclos[0])+' esteve representado por '+contar(maior,'aluno','alunos')+'.';
+    else if(lideres.length===ciclos.length)presenca+=' Os ciclos representados tiveram o mesmo número de participantes, com '+contar(maior,'aluno','alunos')+' em cada um.';
+    else if(lideres.length===1)presenca+=' A participação foi mais expressiva no '+nomeCiclo(lideres[0])+', de onde '+(maior===1?'veio':'vieram')+' '+contar(maior,'atleta','atletas')+' ('+pct(maior,d.participaram)+' do total).';
+    else presenca+=' '+inicial(lista(lideres.map(g=>'o '+nomeCiclo(g))))+' foram os ciclos mais representados, com '+contar(maior,'participante','participantes')+' cada.';
+   }
+   if(semCiclo)presenca+=' Em '+contar(semCiclo,'caso','casos')+', não foi possível identificar o ciclo de ensino.';
+   paragrafo(presenca);
+  }
+  if(presentes.length>1){
+   const porAno=agruparRelatorio(presentes,l=>l.escola.ano);
+   const anos=[...porAno].filter(([ano])=>ano!=='Ano por indicar').sort(([a],[b])=>ordenarTxt(a,b));
+   const perfil=[];
+   if(anos.length>1)perfil.push('Estiveram representados '+contar(anos.length,'ano','anos')+' de escolaridade. '+inicial(lista(anos.map(([ano,ls])=>numero(ls.length)+(ls.length===1?' aluno frequentava o ':' alunos frequentavam o ')+ano)))+'.');
+   const feminino=genero.get('F')?.length||0,masculino=genero.get('M')?.length||0;
+   if(feminino&&masculino)perfil.push('Entre os participantes contaram-se '+contar(feminino,'rapariga','raparigas',true)+' e '+contar(masculino,'rapaz','rapazes')+(presentes.length>feminino+masculino?', entre os alunos com género identificado':'')+'.');
+   if(perfil.length)paragrafo(perfil.join(' '));
+  }
+  const figuras=[graficoRelatorio('Participações por ciclo de ensino',CICLOS_ESCOLARES.filter(g=>g.id!=='sem'||semCiclo||linhas.some(l=>l.ciclo==='sem')).map(g=>[g.nome,porCiclo.get(g.id)?.length||0]),d.participaram,'Cada atleta conta uma vez no respetivo ciclo de ensino.')];
+
+  const porPista=agruparRelatorio(linhas.filter(l=>l.categoria),l=>l.categoria.pista);
+  const configPistas=configuracoesClassificacao(p);
+  const corridas=Object.entries(configPistas).filter(([id])=>!id.startsWith('alf_')).map(([id,cfg])=>({id,cfg,t:totaisRelatorio(porPista.get(id)||[])}))
+   .filter(({cfg,t})=>cfg.horaArranqueMs||cfg.horaFimMs||t.ativos||t.participaram);
+  const lf=categorias.filter(g=>g.tipo==='lf').reduce((s,g)=>s+g.totais.participaram,0);
+  const adaptada=corridas.find(r=>r.id==='adaptada');
+  const adaptados=categorias.find(g=>g.tipo==='adaptada')?.totais.participaram||0;
+  const concluidas=corridas.filter(r=>r.cfg.horaFimMs).length;
+  const regulares=corridas.filter(r=>r.id!=='adaptada');
+  const distancias=agruparRelatorio(regulares,r=>distanciaEscalao(r.id,r.cfg));
+  const metros=valor=>valor.toLocaleString('pt-PT')+' m';
+  const percursos=[];
+  const conhecidas=[...distancias].filter(([m])=>m>0).sort(([a],[b])=>a-b);
+  if(conhecidas.length)percursos.push('O programa das corridas por escalão previu '+lista(conhecidas.map(([m,rs])=>metros(m)+' para '+lista(rs.map(r=>r.cfg.nome||r.id))))+'.');
+  if(lf)percursos.push(lf===1?'O participante da Prova LF correu com os colegas do seu escalão.':'Os '+numero(lf)+' participantes da Prova LF correram com os colegas dos respetivos escalões.');
+  if(adaptada||adaptados){
+   const cfg=adaptada?.cfg,dist=cfg&&distanciaEscalao('adaptada',cfg),voltas=Number(cfg?.voltas);
+   let percurso='A Prova Adaptada '+(adaptados?'contou com '+contar(adaptados,'participante','participantes')+' num percurso próprio':'tinha um percurso próprio previsto');
+   if(dist)percurso+=' de '+metros(dist);
+   if(voltas>0)percurso+=', '+(dist?'distribuído por ':'com ')+contar(voltas,'volta','voltas',true);
+   percursos.push(percurso+'.');
+  }
+  if(percursos.length)paragrafo(percursos.join(' '));
+
+  if(d.participaram){
+   let chegada;
+   if(d.classificados===d.participaram)chegada=d.participaram===1?'O único participante obteve classificação.':'Todos os '+numero(d.participaram)+' participantes terminaram com classificação.';
+   else if(d.classificados)chegada='À chegada, '+contar(d.classificados,'atleta obteve','atletas obtiveram')+' um lugar na classificação.';
+   else chegada='Por enquanto, nenhum participante tem um lugar atribuído na classificação.';
+   const ocorrencias=lista([d.desistencias&&contar(d.desistencias,'desistência','desistências',true),d.desclassificacoes&&contar(d.desclassificacoes,'desclassificação','desclassificações',true)]);
+   if(ocorrencias)chegada+=' No decurso das corridas houve '+ocorrencias+'.';
+   if(d.parciais)chegada+=' '+inicial(contar(d.parciais,'atleta passou','atletas passaram'))+' pelo controlo de voltas sem que a chegada ficasse confirmada.';
+   if(d.porValidar)chegada+=' '+inicial(contar(d.porValidar,'resultado continua','resultados continuam'))+' por confirmar.';
+   if(concluidas<corridas.length)chegada+=' A classificação é ainda provisória enquanto houver corridas por encerrar.';
+   paragrafo(chegada);
+  }else paragrafo('Ainda não há passagens na pista ou chegadas que permitam fazer um balanço desportivo desta edição.');
+  figuras.push(graficoRelatorio('Situação dos atletas com participação registada',[['Classificados',d.classificados],['Desistências',d.desistencias],['Desclassificações',d.desclassificacoes],['Só passagens parciais',d.parciais],['Por validar',d.porValidar]],d.participaram,'Situação individual à data do balanço.'));
+
+  const comLugar=categorias.filter(g=>g.validos.length);
+  const apurados=comLugar.reduce((s,g)=>s+Math.min(6,g.validos.length),0);
+  const provisorio=corridas.length>concluidas||d.porValidar>0;
+  for(const g of comLugar.filter(g=>g.tipo!=='adaptada'&&g.validos.length>1)){
+   const podio=g.validos.slice(0,3).map(identificacaoClassificado);
+   let resultado='Na categoria «'+g.nome+'», o primeiro lugar coube a '+podio[0]+'.';
+   if(podio.length===2)resultado+=' '+podio[1]+' alcançou o segundo lugar.';
+   if(podio.length===3)resultado+=' '+podio[1]+' e '+podio[2]+' completaram o pódio, em segundo e terceiro lugares, respetivamente.';
+   const primeiras=g.turmas.filter(t=>t.lugar===1);
+   if(g.turmas.length>1&&primeiras.length)resultado+=' Na classificação coletiva desta categoria, '+(primeiras.length===1?'venceu a turma '+primeiras[0].nome:'partilharam o primeiro lugar as turmas '+lista(primeiras.map(t=>t.nome)))+'.';
+   if(g.turmas.length>1){
+    const restantes=[2,3].map(i=>{const nomes=g.turmas.filter(t=>t.lugar===i).map(t=>t.nome);return nomes.length?lista(nomes)+' em '+(i===2?'segundo':'terceiro')+' lugar':'';}).filter(Boolean);
+    if(restantes.length)resultado+=' No mesmo pódio '+(g.turmas.filter(t=>t.lugar>1).length===1?'ficou a turma ':'ficaram as turmas ')+lista(restantes)+'.';
+   }
+   paragrafo(resultado);
+  }
+  if(comLugar.some(g=>g.turmas.length>1))paragrafo('Para o pódio das turmas contaram os lugares individuais dos colegas que correram na mesma categoria. A posição de cada turma resultou da média dos seus oito melhores lugares ou, quando teve menos de oito classificados, de todos os lugares obtidos.');
+  f.append(...figuras);
+
+
+  const fecho=h('section',{class:'cm-balanco-fecho'},h('h2',{},'Balanço da organização'));
+  const concluir=texto=>fecho.append(h('p',{class:'cm-balanco-nota'},texto));
+  const geral=balancoGeral[avaliacao.geral];
+  if(d.participaram){
+   let alcance=ciclos.length>1?'':'Ao olharmos para esta edição, destacamos a participação '+(d.participaram===1?'de um aluno':'de '+numero(d.participaram)+' alunos')+'.';
+   if(d.atletas===d.presentesInscritos&&d.atletas>1)alcance+=' Foi particularmente significativo ver chegar à pista todos os que se tinham inscrito para correr.';
+   else if(d.presentesInscritos&&d.atletas>d.presentesInscritos)alcance+=' Dos '+d.atletas+' inscritos, '+numero(d.presentesInscritos)+(d.presentesInscritos===1?' participou':' participaram')+' efetivamente, dando expressão na pista à mobilização das turmas.';
+   if(adaptados&&!lf)alcance+=' O percurso próprio da Prova Adaptada acolheu '+contar(adaptados,'participante','participantes')+'.';
+   if(lf&&!adaptados)alcance+=' A participação '+(lf===1?'de um atleta':'dos '+numero(lf)+' atletas')+' da Prova LF nos percursos dos respetivos escalões merece aqui destaque.';
+   if(alcance)concluir(alcance.trim());
+   let organizacao=c.sim||c.nao||numerados||concluidas?'':'O balanço desportivo tem por base as passagens dos alunos no percurso e os resultados já conhecidos à chegada.';
+   if(d.voluntarios)organizacao+=' O voluntariado fez parte da preparação da prova. '+(d.voluntarios===1?'Um aluno disponibilizou-se':inicial(numero(d.voluntarios))+' alunos disponibilizaram-se')+' para apoiar a organização.';
+   const ocorrencias=lista([d.desistencias&&contar(d.desistencias,'desistência','desistências',true),d.desclassificacoes&&contar(d.desclassificacoes,'desclassificação','desclassificações',true)]);
+   if(ocorrencias)organizacao+=' A equipa teve ainda de acompanhar '+ocorrencias+'.';
+   if(organizacao)concluir(organizacao.trim());
+   if(apurados){
+    const sujeitos=inicial(contar(apurados,'aluno','alunos'));
+    const situacao=provisorio?(apurados===1?'ocupa um dos lugares':'ocupam lugares')+' de apuramento':(apurados===1?'apurou-se':'apuraram-se');
+    let desporto=sujeitos+' '+situacao+' para o Corta-Mato CLDE Porto '+(apurados===1?'pela sua posição':'pelas suas posições')+' entre os seis primeiros da respetiva categoria.';
+    if(comLugar.some(g=>g.turmas.length>1))desporto+=' O pódio das turmas trouxe uma leitura complementar. Cada lugar que entrou no cálculo da média ajudou a construir um resultado que pertence à turma inteira.';
+    if(provisorio)desporto+=' O apuramento definitivo depende do fecho das classificações.';
+    concluir(desporto);
+   }
+  }else{
+   concluir(d.inscritos?'O balanço que podemos fazer nesta fase é o da preparação. As inscrições mostram quem manifestou vontade de participar. Quando houver passagens pelo percurso ou chegadas à meta, poderemos apreciar também a participação efetiva e os resultados da prova.':'Nesta fase, a organização dispõe apenas dos elementos de preparação. O balanço da participação e do desempenho desportivo ficará completo depois das inscrições e das corridas.');
+  }
+  if(geral){
+   const dominios={organizacao:'a preparação das partidas e a logística',percurso:'o percurso e as condições de segurança',apoio:'o apoio dos voluntários'};
+   const grupos=agruparRelatorio(criteriosRelatorio.filter(([k])=>avaliacao[k]),([k])=>avaliacao[k]);
+   const assuntos=valor=>{const itens=(grupos.get(valor)||[]).map(([k])=>dominios[k]);return itens.length===2?'tanto '+itens[0]+' como '+itens[1]:lista(itens);};
+   const excelente=assuntos('Excelente'),bom=assuntos('Bom'),satisfaz=assuntos('Satisfatório'),rever=assuntos('A melhorar');
+   let aprecia='Na apreciação da equipa organizadora, '+(d.participaram?'esta edição':'a preparação da atividade')+' '+geral+'.';
+   if(excelente)aprecia+=' Entre os aspetos que mais valorizámos '+(grupos.get('Excelente').length===1&&grupos.get('Excelente')[0][0]==='apoio'?'esteve ':'estiveram ')+excelente+'.';
+   if(bom)aprecia+=' Avaliámos '+(excelente?'também ':'')+'de forma positiva '+bom+'.';
+   if(satisfaz)aprecia+=' Considerámos satisfatória a resposta da equipa no que toca '+lista(grupos.get('Satisfatório').map(([k])=>({organizacao:'à logística',percurso:'ao percurso e à segurança',apoio:'ao apoio dos voluntários'})[k]))+'.';
+   if(rever)aprecia+=' Para uma próxima edição, identificámos como prioridade rever '+rever+'.';
+   concluir(aprecia);
+  }
+  const destaque=avaliacao.destaques?.trim(),melhoria=avaliacao.melhorias?.trim();
+  if(destaque)concluir(destaque+(/[.!?…»”)]$/.test(destaque)?'':'.'));
+  if(melhoria){
+   const proposta=melhoria+(/[.!?…»”)]$/.test(melhoria)?'':'.');
+   concluir('Da experiência desta prova nasceu uma proposta para a próxima edição — «'+proposta+'»');
+  }
+  f.append(fecho);
+
+  const logos=(p.logosData||[]).filter(Boolean);
+  f.append(h('div',{class:'cm-balanco-assinatura'},
+   logos.length?h('div',{class:'cmd-logos'},logos.map(src=>h('img',{src,alt:'Logótipo da organização'}))):null,
+   h('div',{class:'cm-balanco-signatario'},h('div',{class:'cmd-assinatura'},'Pela organização da prova'),h('div',{class:'cm-balanco-data-assinatura'},'Data  ____ / ____ / ______'))));
+  return f;
+ }
+ function abrirRelatorio(){
+  if(!assegurarAcessoProva())return;
+  const provaId=currentProva.id,user=obterUtilizadorAtual(),chave='cm:teste:relatorio:v1:'+JSON.stringify([user,provaId]);
+  let anterior={};
+  try{anterior=JSON.parse(localStorage.getItem(chave))||{};}catch{}
+  const titulo=h('h3',{id:'cm-balanco-titulo'},'Como correu a prova?');
+  const dlg=h('dialog',{class:'cmd-dlg cm-balanco-dialog','aria-labelledby':titulo.id},titulo);
+  const provaValida=()=>{
+   if(currentProva?.id===provaId&&obterUtilizadorAtual()===user&&podeAcederProva(currentProva))return true;
+   dlg.close();alert('A prova ou a sessão mudou. Abra o relatório na prova pretendida.');return false;
+  };
+  const campos={};
+  function selecionar(k,rotulo,opcoes,obrigatorio=false){
+   const s=h('select',{class:'cmd-campo-in',name:k,required:obrigatorio},opcoes.map(([v,t])=>opcao(v,t)));
+   if(opcoes.some(([v])=>v===anterior[k]))s.value=anterior[k];
+   campos[k]=s;return h('label',{class:'cmd-campo'},h('span',{},rotulo),s);
+  }
+  function escrever(k,rotulo){
+   const t=h('textarea',{class:'cmd-campo-in',rows:2,name:k,maxlength:2000});
+   t.value=typeof anterior[k]==='string'?anterior[k]:'';campos[k]=t;return h('label',{class:'cmd-campo'},h('span',{},rotulo),t);
+  }
+  const botoes=(...nodes)=>h('div',{class:'cmd-dlg-bts'},nodes);
+  const botao=(rotulo,classe,acao)=>h('button',{type:'button',class:'btn '+classe,on:{click:acao}},rotulo);
+  const escala=[['','Sem avaliação'],...['Excelente','Bom','Satisfatório','A melhorar'].map(t=>[t,t])];
+  const form=h('form',{},h('p',{},currentProva.nome||'Prova selecionada'),h('div',{class:'cmd-dlg-campos'},
+   selecionar('geral','Avaliação global (obrigatória)',[['','Escolha a avaliação'],['excelente','Muito bem'],['bom','Bem'],['satisfatorio','De forma satisfatória'],['dificil','Com dificuldades'],['insuficiente','Com dificuldades significativas']],true),
+   criteriosRelatorio.map(([k,label])=>selecionar(k,label,escala)),
+   escrever('destaques','O que correu bem (opcional)'),escrever('melhorias','O que melhoraria (opcional)')),
+   h('p',{class:'cmp-nota'},'Ao gerar o relatório, a avaliação fica guardada neste navegador para esta prova.'),
+   botoes(botao('Cancelar','btn-secondary',()=>dlg.close()),h('button',{type:'submit',class:'btn btn-primary'},'Gerar relatório')));
+  function voltar(){
+   if(!provaValida())return;
+   dlg.classList.remove('cm-balanco-preview');titulo.textContent='Como correu a prova?';dlg.replaceChildren(titulo,form);campos.geral.focus();dlg.scrollTop=0;
+  }
+  form.addEventListener('submit',ev=>{
+   ev.preventDefault();if(!provaValida()||!form.reportValidity())return;
+   const v=Object.fromEntries(Object.entries(campos).map(([k,c])=>[k,c.value.trim()]));
+   const folha=folhaRelatorio(currentProva,v);
+   let aviso=null;
+   try{localStorage.setItem(chave,JSON.stringify(v));}catch{aviso=h('p',{role:'status'},'O navegador não permitiu guardar a avaliação para a próxima visita. Pode imprimir este relatório.');}
+   dlg.classList.add('cm-balanco-preview');titulo.textContent='Pré-visualização do relatório';
+   const imprimir=()=>{
+    if(!provaValida()||CMImpressao.ocupado())return;
+    $('#print-area').replaceChildren(folha.cloneNode(true));dlg.close();imprimirDocumentoCM('relatorio-prova');window.CMPercurso?.marcar?.('relatorio-prova');
+   };
+   const acoes=botoes(botao('Fechar','btn-secondary',()=>dlg.close()),botao('Alterar avaliação','btn-secondary',voltar),botao('Imprimir / guardar PDF','btn-primary',imprimir));
+   dlg.replaceChildren(titulo,...(aviso?[aviso]:[]),acoes,folha);
+   acoes.lastElementChild.focus();dlg.scrollTop=0;
+  });
+  dlg.dataset.prova=provaId;dlg.dataset.utilizador=user;
+  dlg.append(form);dlg.addEventListener('close',()=>dlg.remove(),{once:true});document.body.append(dlg);dlg.showModal();campos.geral.focus();
+ }
+
  const INFO={
   consent:{nome:'Autorizações',desc:'Para as famílias: texto da atividade, QR e resposta SIM ou NÃO.'},
   dorsal:{nome:'Dorsais',desc:'Um dorsal A5 por aluno, com número, nome e QR para a meta.'},
@@ -709,6 +1103,15 @@ window.CMDocs=(()=>{
  }
  function montar(sec){
   const hub=h('div',{class:'cmd-hub'},painelComum(),GRUPOS.map(g=>h('section',{class:'cmd-grupo','aria-label':g.titulo},h('div',{class:'cmd-grupo-t'},h('h2',{},g.titulo),h('p',{class:'cmp-nota'},g.sub)),h('div',{class:'cmd-grelha'},g.docs.map(cartao)))));
+  const depois=hub.querySelector('section[aria-label="Depois da prova"] .cmd-grupo-t');
+  const abrirQuadro=(id,tipo,rotulo)=>h('a',{
+   id,href:'resultados.html?quadro='+tipo,target:'_blank',rel:'noopener',class:'btn btn-secondary',
+   on:{click:evento=>{if(!prepararAberturaQuadroGestao(evento.currentTarget,tipo))evento.preventDefault();}}
+  },rotulo);
+  depois.append(h('div',{class:'cmd-pos-prova-acoes'},
+   h('button',{type:'button',id:'cmd-gerar-relatorio',class:'btn btn-primary',on:{click:abrirRelatorio}},'Gerar relatório da prova'),
+   abrirQuadro('cmd-entrega-certificados','entrega','Quadro de entrega de certificados'),
+   abrirQuadro('cmd-gerar-quadro','classificacao','Quadro de classificação')));
   $('.cmp-cab',sec).after(hub);
  }
  function iniciar(){
@@ -4150,7 +4553,7 @@ const CMPartilhaResultados=(()=>{
  function projetar(prova){
   const alunos=prova.participantes || [],voluntarios=alunos.filter(a=>a.voluntario),porDorsal=new Map(alunos.map((a,i)=>[String(a.dorsal),{a,i}]));
   const out=campos(prova,['id','nome','nomeEscola','tituloDorsal','anoLetivo','dataProva']);
-  out.escaloesConfig=Object.fromEntries(Object.entries(prova.escaloesConfig || {}).map(([id,cfg])=>[id,campos(cfg,['nome','ativo','voltas','distanciaMetros','horaArranqueMs','horaFimMs','reinicioMs','anoMin','anoMax'])]));
+  out.escaloesConfig=Object.fromEntries(Object.entries(prova.escaloesConfig || {}).map(([id,cfg])=>[id,campos(cfg,['nome','ativo','voltas','distanciaMetros','horaArranqueMs','horaFimMs','reinicioMs','revisaoPista','anoMin','anoMax'])]));
   // Process numbers become local join keys. Unclassified pupils contribute only
   // category/count data; the public document contains no account or consent data.
   out.participantes=alunos.flatMap((a,i)=>a.voluntario?[]:[{...campos(a,['dorsal','ano','turma','escalaoId','escalaoCorridaId','genero','ativo','alf','nee','limitacoesFuncionais']),processo:'p'+i}]);
@@ -4254,7 +4657,11 @@ const CMFita=(()=>{
    if(acao==='desclassificar' && !fitas(prova,r))throw Error('Este escalão não tem fitas associadas. Só pode validar a chegada.');
   }
   if(acao==='repor' && !r.desqualificado)return {changed:false,resultado:r};
-  r.desqualificado=acao==='desclassificar';r.fita={estado:r.desqualificado?'desclassificado':'validado',revisao:revisao+1,operacao:opcoes.operacao || globalThis.crypto?.randomUUID?.() || Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)};
+  if(acao==='repor'&&r.semChegadaAntesDSC){
+   (prova.anulacoesDSC||={})[id]=true;prova.resultados=prova.resultados.filter(item=>item!==r);
+   return {changed:true,resultado:r};
+  }
+  r.desqualificado=acao==='desclassificar';r.fita={estado:r.desqualificado?'desclassificado':'validado',origem:opcoes.origem||'gestao',revisao:revisao+1,operacao:opcoes.operacao || globalThis.crypto?.randomUUID?.() || Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)};
   return {changed:true,resultado:r};
  }
  function mesclar(estado,fonte){
@@ -4264,7 +4671,19 @@ const CMFita=(()=>{
    for(const [esc,cfg] of Object.entries(outra.escaloesConfig || {}))if(Number(cfg.reinicioMs || 0)>Number(prova.escaloesConfig?.[esc]?.reinicioMs || 0)){
     prova.escaloesConfig=prova.escaloesConfig || {};prova.escaloesConfig[esc]={...cfg};prova.resultados=[...(prova.resultados || []).filter(r=>r.escalaoId!==esc),...(outra.resultados || []).filter(r=>r.escalaoId===esc)];
    }
-   const resultados=new Map((outra.resultados || []).map(r=>[chave(outra,r),r]));
+       for(const [id,remoto] of Object.entries(outra.escaloesConfig||{})){
+     const cfg=prova.escaloesConfig?.[id];
+     if(!cfg||Number(cfg.reinicioMs||0)!==Number(remoto.reinicioMs||0))continue;
+     const local=Number(cfg.revisaoPista)||0,recebida=Number(remoto.revisaoPista)||0;
+     if(recebida>local || recebida===local && !cfg.horaFimMs && remoto.horaFimMs && (!cfg.horaArranqueMs||cfg.horaArranqueMs===remoto.horaArranqueMs)){
+      Object.assign(cfg,{revisaoPista:recebida,horaArranqueMs:remoto.horaArranqueMs||null,horaFimMs:remoto.horaFimMs||null,grupoArranqueId:remoto.grupoArranqueId||null});
+     }
+    }
+    if(outra.anulacoesDSC||prova.anulacoesDSC){
+     prova.anulacoesDSC={...outra.anulacoesDSC,...prova.anulacoesDSC};
+     prova.resultados=(prova.resultados||[]).filter(r=>!r.semChegadaAntesDSC||!prova.anulacoesDSC[chave(prova,r)]);
+    }
+    const resultados=new Map((outra.resultados || []).map(r=>[chave(outra,r),r]));
    for(const r of prova.resultados || []){
     const remoto=resultados.get(chave(prova,r));if(!remoto)continue;const a=Number(r.fita?.revisao)||0,b=Number(remoto.fita?.revisao)||0;
     if(remoto.fita && b>=a){r.fita={...remoto.fita};r.desqualificado=remoto.desqualificado===true;}
@@ -5802,6 +6221,10 @@ const CMTextoConsentimento=(()=>{
                         <input type="text" id="ano-letivo" value="" placeholder="Ex: 2025/2026" oninput="salvarEAtualizar()">
                     </div>
                     <div class="input-group">
+                        <label for="modo-numeracao">Número a utilizar</label>
+                        <select id="modo-numeracao" onchange="cmMostrarModoNumeracao();window.cmNumeracaoEstado?.(true)"><option value="sequencial">Gerar número sequencial</option><option value="processo">Usar número de processo</option></select>
+                    </div>
+                    <div class="input-group">
                         <label>Dorsal Inicial:</label>
                         <input type="number" id="dorsal-inicial" value="1" min="1" oninput="window.cmNumeracaoEstado?.(true)">
                     </div>
@@ -6224,7 +6647,7 @@ const CMTextoConsentimento=(()=>{
                 <button class="btn btn-primary btn-block" style="height: 50px; font-size: 16px;" onclick="imprimirCertificados()">🖨️ Imprimir Certificados Selecionados (Formato A4)</button>
                 <div class="cert-concluidos-area">
                     <h4>Provas / escalões terminados</h4>
-                    <p>Imprima os certificados de classificação dos três primeiros de cada prova/escalão terminado. Na Prova Adaptada, são emitidos os certificados de participação.</p>
+                    <p>Imprima os certificados de classificação dos três primeiros de cada prova/escalão terminado. Na Prova Adaptada, cada atleta classificado recebe o certificado com o seu lugar na classificação conjunta.</p>
                     <div id="cert-escaloes-concluidos" class="cert-concluidos-grid" role="group" aria-label="Certificados por prova ou escalão terminado"></div>
                 </div>
             </div>
@@ -7103,6 +7526,8 @@ async function guardarModalProva() {
             if (currentProva.escaloesConfig[key]) {
                 configEsc[key].horaArranqueMs = currentProva.escaloesConfig[key].horaArranqueMs;
                 configEsc[key].horaFimMs = currentProva.escaloesConfig[key].horaFimMs;
+                configEsc[key].revisaoPista=Number(currentProva.escaloesConfig[key].revisaoPista)||0;
+                configEsc[key].reinicioMs=Number(currentProva.escaloesConfig[key].reinicioMs)||0;
                 configEsc[key].grupoArranqueId = currentProva.escaloesConfig[key].grupoArranqueId || null;
             }
         });
@@ -7249,7 +7674,10 @@ function adicionarParticipanteManual() {
     // seguinte em vez de se renumerar toda a lista.
     let jaNumerados = currentProva.participantes.some(a => String(a.dorsal || '').trim() !== '');
     let novoDorsal = "";
-    if(jaNumerados && !voluntario) {
+    if(currentProva.modoNumeracao==='processo' && !voluntario){
+        const erro=cmValidarProcessosDorsais([...currentProva.participantes,{processo:proc,nome}]);
+        if(erro){alert(erro);return;}novoDorsal=String(proc).trim();
+    }else if(jaNumerados && !voluntario) {
         let digitos = parseInt(document.getElementById('digitos-dorsal').value) || currentProva.digitosDorsal || 3;
         let inicial = parseInt(document.getElementById('dorsal-inicial').value) || currentProva.dorsalInicial || 1;
         let maior = currentProva.participantes.reduce((m, a) => Math.max(m, parseInt(a.dorsal, 10) || 0), inicial - 1);
@@ -7335,7 +7763,7 @@ function gerarNumeracaoDorsais() {
 
     let numero = inicial;
     currentProva.participantes.forEach(aluno => {
-        aluno.dorsal = aluno.voluntario ? '' : String(numero++).padStart(digitos, '0');
+        aluno.dorsal = aluno.voluntario ? '' : currentProva.modoNumeracao==='processo' ? String(aluno.processo).trim() : String(numero++).padStart(digitos, '0');
     });
     saveState();
     atualizarTabelaParticipantes();
@@ -7890,7 +8318,10 @@ function atualizarDisplayArranque() {
     });
 
     html += linhasEscaloesSemInscricoes(inscricoes) + '</div>';
-    container.innerHTML = html;
+    const estrutura=html.replace(/(id="timer-live-[^"]+">)[^<]*/g,'$1');
+    if(container.cmEstrutura!==estrutura||!container.querySelector('.race-card')){
+        container.innerHTML=html;container.cmEstrutura=estrutura;
+    }
     atualizarSelecaoCorridas();
 
     let kpiCorridasAtiv = document.getElementById('kpi-corridas-ativas');
@@ -7992,7 +8423,7 @@ function fecharGrupoCorrida(k) {
     const agora = Date.now();
     membrosGrupoCorrida(k).forEach(key => {
         const cfg = currentProva.escaloesConfig[key];
-        if (cfg.horaArranqueMs) cfg.horaFimMs = agora;
+        if(cfg.horaArranqueMs && !cfg.horaFimMs){cfg.horaFimMs=Math.max(agora,cfg.horaArranqueMs);cfg.revisaoPista=(Number(cfg.revisaoPista)||0)+1;}
     });
 }
 
@@ -8008,15 +8439,66 @@ function iniciarEscalao(k) {
     atualizarDisplayArranque();
 }
 
+const prefixoPistaPendente='cm.pista.pendente.';
+let envioPistaEmCurso=false;
+function guardarFimPista(k){
+ const user=obterUtilizadorAtual(),id=currentProva.id;
+ for(const esc of membrosGrupoCorrida(k)){
+  const c=currentProva.escaloesConfig[esc];
+  if(!c?.horaArranqueMs)continue;
+  const chave=prefixoPistaPendente+JSON.stringify([user,id,esc]);
+  try{localStorage.setItem(chave,JSON.stringify({id,esc,user,authVersion:sessionStorage.getItem('cortaMatoAuthVersion')||'1',inicio:c.horaArranqueMs,grupo:c.grupoArranqueId||null,fim:c.horaFimMs||null,reinicio:Number(c.reinicioMs)||0,revisao:c.revisaoPista||0}));}catch{saveState(true);return;}
+ }
+ cmGravarLocal(appState);mostrarEstadoNuvemCSV(false);enviarFinsPista();
+}
+async function enviarFinsPista(){
+ const db=dbOnline,user=obterUtilizadorAtual();
+ if(!db||!user||envioPistaEmCurso||navigator.onLine===false)return;
+ const gravados=Object.keys(localStorage).filter(k=>k.startsWith(prefixoPistaPendente)).map(k=>[k,localStorage.getItem(k)]).map(([k,v])=>{try{return [k,v,JSON.parse(v)];}catch{return [k,v,null];}}).filter(([,v,d])=>d?.user===user&&String(d.authVersion)===String(sessionStorage.getItem('cortaMatoAuthVersion')||1));
+ if(!gravados.length)return;
+ envioPistaEmCurso=true;
+ try{
+  const ref=db.collection('cortaMatoApp').doc('estadoGlobal');
+  const confirmados=await db.runTransaction(async tx=>{
+   const snap=await tx.get(ref);if(!snap.exists)return [];
+   const estado=snap.data(),prontos=[];let mudou=false;
+   for(const [chave,v,d] of gravados){
+    const prova=estado.provas?.find(p=>p.id===d.id);if(!prova)continue;
+    const conta=(estado.utilizadores||[]).find(c=>c.user===user);
+    if(prova.deleted||!conta||Number(conta.authVersion||1)!==Number(d.authVersion)||tipoUtilizador(conta)!=='administrador'&&(prova.criador||'admin')!==user){prontos.push([chave,v]);continue;}
+    validarContaPartilha(estado,prova);const c=prova.escaloesConfig?.[d.esc];
+    if(!c||Number(c.reinicioMs||0)>d.reinicio){prontos.push([chave,v]);continue;}
+    if(Number(c.reinicioMs||0)!==d.reinicio)continue;
+    if(c.horaArranqueMs&&c.horaArranqueMs!==d.inicio){prontos.push([chave,v]);continue;}
+    if((Number(c.revisaoPista)||0)<d.revisao||c.revisaoPista===d.revisao&&d.fim&&!c.horaFimMs){c.horaArranqueMs=d.inicio;c.grupoArranqueId=c.grupoArranqueId||d.grupo||null;c.horaFimMs=d.fim;c.revisaoPista=d.revisao;mudou=true;}
+    prontos.push([chave,v]);
+   }
+   if(mudou)tx.update(ref,{provas:estado.provas});return prontos;
+  });
+  for(const [k,v] of confirmados)if(localStorage.getItem(k)===v)localStorage.removeItem(k);
+ }catch(error){console.warn('A alteração da corrida aguarda sincronização.',error.code||error.message);}
+ finally{envioPistaEmCurso=false;mostrarEstadoNuvemCSV();}
+}
 function terminarEscalao(k) {
     if (!assegurarAcessoProva()) return;
     if (!currentProva || !currentProva.escaloesConfig || !currentProva.escaloesConfig[k] || !currentProva.escaloesConfig[k].horaArranqueMs) return;
-    const cmFaltam = cmFaltamNaCorrida(k);
-    if (cmFaltam && !confirm('Faltam ' + cmFaltam + ' aluno(s) desta corrida chegar à meta.\n\nTerminar a corrida mesmo assim? Pode reabri-la depois.')) return;
-    fecharGrupoCorrida(k);
-    saveState(true);
-    atualizarDisplayArranque();
-    checkFimGlobal();
+    const p=currentProva,c=p.escaloesConfig[k],inicio=c.horaArranqueMs,reinicio=c.reinicioMs||0;
+    const concluir=()=>{
+        const atual=currentProva?.escaloesConfig?.[k];
+        if(currentProva?.id!==p.id||!atual||atual.horaFimMs||atual.horaArranqueMs!==inicio||(atual.reinicioMs||0)!==reinicio||!assegurarAcessoProva())return;
+        fecharGrupoCorrida(k);guardarFimPista(k);atualizarDisplayArranque();checkFimGlobal();
+    };
+    const faltam=cmFaltamNaCorrida(k);if(!faltam){concluir();return;}
+    if(document.getElementById('cm-confirmar-fim'))return;
+    const dlg=document.createElement('dialog');dlg.id='cm-confirmar-fim';dlg.className='cmd-dlg';dlg.setAttribute('aria-labelledby','cm-titulo-fim');
+    const titulo=document.createElement('h3');titulo.id='cm-titulo-fim';titulo.textContent='Terminar a corrida?';
+    const aviso=document.createElement('p');aviso.textContent=(c.nome||k)+' · '+faltam+(faltam===1?' atleta ainda sem chegada.':' atletas ainda sem chegada.')+' Pode reabrir a corrida na gestão.';
+    const acoes=document.createElement('div');acoes.className='cmd-dlg-bts';
+    for(const [texto,confirmar] of [['Continuar em pista',false],['Terminar prova',true]]){
+        const b=document.createElement('button');b.type='button';b.className='btn '+(confirmar?'btn-danger':'btn-secondary');b.textContent=texto;
+        b.onclick=()=>{dlg.close();if(confirmar)concluir();};acoes.append(b);
+    }
+    dlg.addEventListener('close',()=>dlg.remove(),{once:true});dlg.append(titulo,aviso,acoes);document.body.append(dlg);dlg.showModal();
 }
 
 function notificarReinicioDoQuadro(prova) {
@@ -8076,16 +8558,14 @@ function reabrirEscalao(k) {
     let cfg = currentProva.escaloesConfig[k];
     
     // Reabrir todos os membros para preservar o fim em conjunto.
-    membrosGrupoCorrida(k).forEach(key => { currentProva.escaloesConfig[key].horaFimMs = null; });
+    membrosGrupoCorrida(k).forEach(key => { const cfg=currentProva.escaloesConfig[key];cfg.horaFimMs=null;cfg.revisaoPista=(Number(cfg.revisaoPista)||0)+1; });
     
     // Se estava na aba de concluídas, muda para 'todas' para a prova reaberta continuar logo visível
     if (filtroCardsCorridasAtivo === 'finished') {
         filtrarCardsCorridas('todas');
     }
     
-    playAudioBeep('start');
-    saveState(true);
-    atualizarDisplayArranque();
+    guardarFimPista(k);atualizarDisplayArranque();playAudioBeep('start');
 }
 
 function checkFimGlobal() {
@@ -8327,7 +8807,7 @@ function registarAtletaNaMeta(dorsal, proc, nome, chegadaMs) {
         let liveBox = document.getElementById('live-feed-box');
         let liveText = document.getElementById('live-feed-text');
         if (liveBox && liveText) {
-            const classificacao = projetarClassificacaoALF(currentProva, pObj);
+            const classificacao = projetarClassificacao(currentProva, pObj);
             let posAtual = resultadosClassificacao(currentProva).filter(r => r.escalaoId === classificacao.escalaoId && !r.desistencia && !r.desqualificado).length;
             liveText.innerHTML = `<b>Dorsal ${cmEsc(pObj.dorsal)}</b> — ${cmEsc(pObj.nome)} (${cmEsc(classificacao.escalaoNome || cfg.nome)}) — <b>${formatarTempo(tempoProva)}</b> (${posAtual}º Lugar) às ${new Date().toLocaleTimeString()}`;
             liveBox.style.display = 'flex';
@@ -8406,6 +8886,11 @@ function atualizarTabelaResultados() {
     if (!tbody) return;
     tbody.innerHTML = '';
 
+    const lugares=new Map(),contagem=new Map();
+    for(const resultado of classificados.filter(resultadoValidoParaCertificado)){
+        const id=resultado.escalaoId||'geral',lugar=(contagem.get(id)||0)+1;
+        contagem.set(id,lugar);lugares.set(resultado,lugar);
+    }
     let resultadosExibir = classificados;
     if (filtroEsc) {
         resultadosExibir = resultadosExibir.filter(r => r.escalaoId === filtroEsc);
@@ -8424,26 +8909,20 @@ function atualizarTabelaResultados() {
         return;
     }
 
-    let contadoresPorEscalao = {};
 
     const fragRes = document.createDocumentFragment();
     resultadosExibir.forEach((r) => {
         let tr = document.createElement('tr');
         
-        let escKey = r.escalaoId || 'geral';
-        if (!contadoresPorEscalao[escKey]) contadoresPorEscalao[escKey] = 0;
-        
-        let posRelativa = 0;
-        if (!r.desistencia && !r.desqualificado) {
-            contadoresPorEscalao[escKey]++;
-            posRelativa = contadoresPorEscalao[escKey];
-        }
+        const posRelativa=lugares.get(r);
 
         let badgeHtml = '';
         if (r.desistencia) {
             badgeHtml = '<span class="status-pill" style="color:var(--danger); border-color:var(--danger-border); font-size:11px;">DESISTIU</span>';
         } else if (r.desqualificado) {
             badgeHtml = '<span class="status-pill" style="color:var(--danger); border-color:var(--danger-border); font-size:11px;">Desclassificado</span>';
+        } else if (!posRelativa) {
+            badgeHtml='—';
         } else if (posRelativa === 1) {
             tr.className = 'rank-1';
             badgeHtml = '<span class="badge-podium badge-ouro">🥇 1º</span>';
@@ -8481,10 +8960,16 @@ function atualizarTabelaResultados() {
             <td style="display:flex; gap:4px; justify-content:center; align-items:center;">
                 ${btnParciais}
                 ${btnDsq}
-                ${r.desqualificado ? `<button type="button" class="btn btn-success btn-sm" style="padding:2px 7px;font-size:11px;height:28px" title="Reverter desclassificação" onclick="reverterDesclassificacao('${cmJs(r.dorsal)}', '${cmJs(r.processo)}')">Reverter</button>` : ''}
+                ${r.desqualificado && !r.desistencia ? `<button type="button" class="btn btn-success btn-sm" style="padding:2px 7px;font-size:11px;height:28px" title="Reverter desclassificação" onclick="reverterDesclassificacao('${cmJs(r.dorsal)}', '${cmJs(r.processo)}')">Reverter</button>` : ''}
+                ${r.desistencia ? `<button type="button" class="btn btn-success btn-sm" style="padding:2px 7px;font-size:11px;height:28px" data-reverter-desistencia title="Reverter desistência" aria-label="Reverter desistência">Reverter</button>` : ''}
                 <button class="btn btn-danger btn-sm" style="padding:2px 7px; font-size:11px; height:28px;" onclick="removerResultado('${cmJs(r.dorsal)}', '${cmJs(r.processo)}')" title="Remover">🗑️</button>
             </td>
         `;
+        const reverter=tr.querySelector("[data-reverter-desistencia]");
+        if(reverter){
+            const provaId=currentProva.id;
+            reverter.addEventListener("click",()=>reverterDesistencia(provaId,r));
+        }
         fragRes.appendChild(tr);
     });
     tbody.appendChild(fragRes);
@@ -8504,11 +8989,13 @@ function registarDesistencia(dorsal, proc, nome) {
     if(pObj.voluntario){alert('Este aluno está inscrito como voluntário e não tem dorsal de competição.');return;}
     if (proc && String(pObj.processo || '') !== String(proc).trim()) { alert(`O dorsal ${pObj.dorsal} pertence a ${pObj.nome}, mas este QR foi impresso para outro aluno (processo ${proc}). Reimprima este dorsal.`); return; }
     if (pObj.ativo === false) { alert(`O dorsal ${pObj.dorsal} (${pObj.nome}) está marcado como inativo.`); return; }
-    if (currentProva.resultados.find(r => r.dorsal === pObj.dorsal && r.desistencia)) return;
-    const tempoValido = currentProva.resultados.find(r => r.dorsal === pObj.dorsal && !r.desqualificado);
-    if (tempoValido && !confirm(`${pObj.nome} já tem o tempo ${formatarTempo(tempoValido.tempoProvaMs)}.\n\nMarcar como desistência apaga este tempo. Continuar?`)) return;
+    const mesmoAtleta=r=>String(r.dorsal)===String(pObj.dorsal)&&(!r.processo||!pObj.processo||String(r.processo)===String(pObj.processo));
+    const anterior=currentProva.resultados.find(mesmoAtleta);
+    if(anterior?.desistencia)return;
+    const tempoValido = anterior && !anterior.desqualificado ? anterior : null;
+    if (tempoValido && !confirm(`${pObj.nome} já tem o tempo ${formatarTempo(tempoValido.tempoProvaMs)}.\n\nMarcar como desistência? Pode repor o resultado em «Reverter».`)) return;
     
-    currentProva.resultados = currentProva.resultados.filter(r => r.dorsal !== pObj.dorsal);
+    currentProva.resultados = currentProva.resultados.filter(r => !mesmoAtleta(r));
 
     currentProva.resultados.push({
         dorsal: pObj.dorsal,
@@ -8522,14 +9009,75 @@ function registarDesistencia(dorsal, proc, nome) {
         escalaoNome: currentProva.escaloesConfig[pObj.escalaoId] ? currentProva.escaloesConfig[pObj.escalaoId].nome : 'Desistente',
         chegadaMs: Date.now(),
         tempoProvaMs: 99999999,
+        resultadoAntesDesistencia: anterior || null,
         desistencia: true
     });
 
     playAudioBeep('alert');
-    saveState();
+    saveState(true);
     atualizarDisplayArranque();
     atualizarTabelaResultados();
     alert(`⚠️ Dorsal ${pObj.dorsal} (${pObj.nome}) marcado como Desistência.`);
+}
+
+function chegadaAntesDaDesistencia(prova,r){
+    if(Object.hasOwn(r,'resultadoAntesDesistencia'))return r.resultadoAntesDesistencia;
+    // As versões anteriores substituíam a chegada, mas conservavam as passagens do dorsal.
+    const cfg=prova.escaloesConfig?.[r.escalaoId],aluno=alunoPorDorsal(prova,r.dorsal);
+    if(!cfg||!aluno||(r.processo&&String(aluno.processo)!==String(r.processo)))return null;
+    const partida=Number(cfg.horaArranqueMs),voltas=Number(cfg.voltas);
+    if(!partida||!Number.isInteger(voltas)||voltas<1)return null;
+    const scans=(aluno.scans||[]).map(Number).filter(t=>Number.isFinite(t)&&t>=partida&&t<=Number(r.chegadaMs));
+    if(scans.length!==voltas||scans.some((t,i)=>i>0&&t<=scans[i-1]))return null;
+    const {desistencia,...chegada}=r;
+    return {...chegada,chegadaMs:scans.at(-1),tempoProvaMs:scans.at(-1)-partida,
+        temposParciais:scans.map(t=>formatarTempo(t-partida))};
+}
+async function reverterDesistencia(provaId,linha){
+    if(currentProva?.id!==provaId||!assegurarAcessoProva())return;
+    const corresponde=r=>r.desistencia&&String(r.dorsal)===String(linha.dorsal)&&
+        String(r.processo??'')===String(linha.processo??'')&&String(r.chegadaMs??'')===String(linha.chegadaMs??'');
+    const original=currentProva.resultados.find(corresponde);
+    if(!original)return;
+    const chave=CMFita.chave(currentProva,original);
+    function indice(p){return (p.resultados||[]).findIndex(r=>corresponde(r)&&CMFita.chave(p,r)===chave);}
+    function repor(p,i,chegada){
+        if(chegada)p.resultados.splice(i,1,chegada);
+        else p.resultados.splice(i,1);
+    }
+    try{
+        let chegada;
+        if(dbOnline&&navigator.onLine!==false){
+            // Uma desistência acabada de marcar na gestão pode estar ainda em trânsito.
+            if(promessaEnvioCSV)await promessaEnvioCSV;
+            if(currentProva?.id!==provaId||!podeAcederProva(currentProva))return;
+            const ref=dbOnline.collection('cortaMatoApp').doc('estadoGlobal');
+            const decisao=await dbOnline.runTransaction(async tx=>{
+                const snap=await tx.get(ref),estado=snap.exists?snap.data():null;
+                if(!estado)throw Error('A prova ainda não foi sincronizada.');
+                const p=estado.provas.find(v=>v.id===provaId);validarContaPartilha(estado,p);
+                const i=indice(p);
+                if(i<0)return {alterada:false};
+                const chegada=chegadaAntesDaDesistencia(p,p.resultados[i]);
+                repor(p,i,chegada);tx.set(ref,CMConsentimento.estadoNuvem(estado));
+                return {alterada:true,chegada};
+            });
+            if(!decisao.alterada){window.CMPercurso?.aviso('A desistência já não consta dos resultados sincronizados.');return;}
+            chegada=decisao.chegada;
+            const local=appState.provas.find(p=>p.id===provaId);
+            if(local){const i=indice(local);if(i>=0)repor(local,i,chegada);}
+            cmGravarLocal(appState);
+        }else{
+            const i=indice(currentProva);if(i<0)return;
+            chegada=chegadaAntesDaDesistencia(currentProva,original);
+            repor(currentProva,i,chegada);saveState(true);
+        }
+        if(currentProva?.id!==provaId)return;
+        atualizarTabelaResultados();atualizarDisplayArranque();verificarTabs();
+        const nota=chegada?'Foi reposto o resultado anterior.':currentProva.escaloesConfig?.[original.escalaoId]?.horaFimMs?
+            'Para registar uma nova chegada, reabra o escalão.':'O dorsal pode voltar a ser lido.';
+        window.CMPercurso?.aviso('Desistência revertida. '+nota);
+    }catch(erro){alert(erro.message||'Não foi possível reverter a desistência.');}
 }
 
 function removerResultado(dorsal, processo) {
@@ -8562,14 +9110,10 @@ function imprimirClassificacoes() {
         alert("Não há resultados para imprimir."); return;
     }
     
-    let resultadosValidos = resultadosClassificacao(currentProva).filter(r => {
-        let escId = (r.escalaoId || '').toLowerCase();
-        let escNome = (r.escalaoNome || '').toLowerCase();
-        return !escId.includes('adaptada') && !escId.includes('nee') && !escNome.includes('adaptada') && !escNome.includes('nee');
-    });
+    const resultadosValidos = resultadosClassificacao(currentProva);
 
     if (resultadosValidos.length === 0) {
-        alert("Não há resultados elegíveis para imprimir (excluindo Prova Adaptada).");
+        alert("Não há resultados para imprimir.");
         return;
     }
 
@@ -8769,16 +9313,22 @@ function exportarResultados() {
 // =========================================================
 // SISTEMA DE UTILIZADORES E SESSÕES
 // =========================================================
-function prepararAberturaQuadroGestao(link) {
+function prepararAberturaQuadroGestao(link, quadro='') {
     aplicarPermissoesSessao();
+    if(quadro&&!assegurarAcessoProva())return false;
     const user=obterUtilizadorAtual();
     if(sessionStorage.getItem('cortaMatoLogado')!=='true'||!user)return false;
     const conta=obterUtilizadores().find(c=>c.user===user);
     if(!conta)return false;
-    const token=crypto.randomUUID();
-    try { localStorage.setItem('cortaMatoAcessoQuadroGestao',JSON.stringify({token,user,authVersion:Number(conta.authVersion||1),expires:Date.now()+600000})); }
+    const chave='cortaMatoQuadroGestao:'+user,authVersion=Number(conta.authVersion||1);let token;
+    try {const anterior=JSON.parse(localStorage.getItem(chave)||'null');token=anterior?.authVersion===authVersion?anterior.token:crypto.randomUUID();localStorage.setItem(chave,JSON.stringify({token,user,authVersion})); }
     catch(e){alert('Não foi possível abrir o quadro com a sessão atual. Permita o armazenamento neste navegador e tente novamente.');return false;}
-    link.href='resultados.html?origem=gestao&utilizador='+encodeURIComponent(user)+'&sessao='+encodeURIComponent(token)+'&v='+Date.now();
+    const parametros=new URLSearchParams({origem:'gestao',utilizador:user,sessao:token,v:String(Date.now())});
+    if(quadro){
+        parametros.set('quadro',quadro);
+        parametros.set('prova',currentProva.id);
+    }
+    link.href='resultados.html?'+parametros;
     return true;
 }
 function obterUtilizadorAtual() {
@@ -8795,6 +9345,7 @@ function eAdministrador() {
 function obterUtilizadores() {
     if (appState && Array.isArray(appState.utilizadores) && appState.utilizadores.length) return appState.utilizadores;
     try { const lista = JSON.parse(localStorage.getItem('cortaMatoUtilizadores') || 'null'); if (Array.isArray(lista) && lista.length) return lista; } catch(e) {}
+    try{const guardados=JSON.parse(localStorage.getItem('cortaMatoApp')||'null')?.utilizadores;if(Array.isArray(guardados)&&guardados.length)return guardados;}catch{}
     return [{user:'admin',pass:'admin2026',tipo:'administrador',authVersion:1},{user:'professor',pass:'escola2026',tipo:'geral',authVersion:1}];
 }
 function podeAcederProva(prova) {
@@ -8829,6 +9380,7 @@ window.efetuarLogin = function() {
     aplicarPermissoesSessao(); initApp();
 };
 function terminarSessao() {
+    localStorage.removeItem('cortaMatoQuadroGestao:'+obterUtilizadorAtual());localStorage.removeItem('cortaMatoAcessoQuadroGestao');
     ['cortaMatoLogado','cortaMatoUtilizadorAtual','cortaMatoAuthVersion'].forEach(k=>sessionStorage.removeItem(k));
     location.reload();
 }
@@ -9216,13 +9768,13 @@ function limparLogosCertificado() {
     renderCertLogosPreview();
 }
 
-function resultadoNEE(r) {
-    const participante = (currentProva.participantes || []).find(p =>
-        (r.processo != null && r.processo !== '' && p.processo != null && String(p.processo) === String(r.processo)) ||
-        (r.dorsal != null && p.dorsal != null && String(p.dorsal) === String(r.dorsal)));
-    return r.nee === true || participante?.nee === true || /adaptad|\bnee\b/i.test(String(r.escalaoId || '') + ' ' + String(r.escalaoNome || ''));
+function incluirNoLoteCertificados(tipo, resultado, lugar) {
+    if(tipo === 'todos')return true;
+    if(tipo === 'nee')return resultado.escalaoId === 'adaptada';
+    if(tipo === 'classificacao')return lugar <= 3;
+    return tipo === 'participacao' && lugar > 3 && resultado.escalaoId !== 'adaptada';
 }
-function calcularPodioTurmas(resultados) {
+function calcularPodioTurmas(resultados, participantes = currentProva?.participantes || []) {
     const grupos = new Map();
     (resultados || []).forEach(r => {
         const chave = r.escalaoId || r.escalaoNome || 'Geral';
@@ -9236,7 +9788,7 @@ function calcularPodioTurmas(resultados) {
         let posicao = 0;
         classificados.forEach((r,i) => {
             if (!i || Number(r.tempoProvaMs) !== Number(classificados[i-1].tempoProvaMs)) posicao = i+1;
-            const aluno = (currentProva.participantes || []).find(p => (r.processo != null && p.processo != null && String(r.processo) === String(p.processo)) || (r.dorsal != null && p.dorsal != null && String(r.dorsal) === String(p.dorsal)));
+            const aluno = participantes.find(p => (r.processo != null && p.processo != null && String(r.processo) === String(p.processo)) || (r.dorsal != null && p.dorsal != null && String(r.dorsal) === String(p.dorsal)));
             const ano = cmAnoNum(r.ano || aluno?.ano);
             const turma = String(r.turma || aluno?.turma || '').replace(/[º°ªᵃ]/g,'').trim().toLocaleUpperCase('pt-PT');
             if (!turma) return;
@@ -9286,12 +9838,8 @@ function obterEscaloesCertificadosConcluidos() {
     return [...presentes].filter(id => config[id]?.horaFimMs).map(id => {
         const classificados = resultados.filter(r => r.escalaoId === id && resultadoValidoParaCertificado(r))
             .sort((a,b) => Number(a.tempoProvaMs) - Number(b.tempoProvaMs));
-        const adaptada = !config[id].alf && (classificados.length
-            ? classificados.every(r => resultadoNEE(r) && !temLimitacoesFuncionais(r))
-            : /adaptad|\bnee\b/i.test(id + ' ' + config[id].nome));
-        const total = classificados.filter((r,i) => adaptada
-            ? resultadoNEE(r) && !temLimitacoesFuncionais(r)
-            : i < 3 && (!resultadoNEE(r) || temLimitacoesFuncionais(r))).length;
+        const adaptada = id === 'adaptada';
+        const total = adaptada ? classificados.length : Math.min(3,classificados.length);
         return {id, nome:config[id].nome || id, tipo:adaptada ? 'nee' : 'classificacao', total};
     }).sort((a,b) => getOrdemEscalao(a.id) - getOrdemEscalao(b.id) || a.nome.localeCompare(b.nome,'pt-PT',{numeric:true}));
 }
@@ -9322,7 +9870,7 @@ function atualizarBotoesCertificadosConcluidos() {
         nome.textContent = '🖨️ ' + escalao.nome;
         const detalhe = document.createElement('small');
         detalhe.textContent = escalao.total
-            ? escalao.total + (escalao.total === 1 ? ' certificado de ' : ' certificados de ') + (escalao.tipo === 'nee' ? 'participação' : 'classificação')
+            ? escalao.total + (escalao.total === 1 ? ' certificado' : ' certificados') + (escalao.tipo === 'nee' ? ' · classificação conjunta' : ' de classificação')
             : 'Sem classificações válidas';
         button.append(nome,detalhe);
         button.addEventListener('click',() => imprimirCertificados({escalaoId:escalao.id,provaId}));
@@ -9345,8 +9893,7 @@ function imprimirCertificados(opcoes = {}) {
         return;
     }
     const tipo = escalao?.tipo || document.getElementById('cert-tipo')?.value || 'todos';
-    let elegiveis = resultadosClassificacao(currentProva).filter(r => !r.desistencia && !r.desqualificado &&
-        (!escalaoId || r.escalaoId === escalaoId && resultadoValidoParaCertificado(r)));
+    const elegiveis = resultadosClassificacao(currentProva).filter(r => resultadoValidoParaCertificado(r) && (!escalaoId || r.escalaoId === escalaoId));
     
     if (elegiveis.length === 0) {
         alert("Não há atletas elegíveis para certificado (apenas desistências ou desclassificações)."); return;
@@ -9376,10 +9923,8 @@ function imprimirCertificados(opcoes = {}) {
         
         resEsc.forEach((r, idx) => {
             let pos = idx + 1;
-            const isNEE = resultadoNEE(r) && !temLimitacoesFuncionais(r);
-            let isPodium = pos <= 3 && !isNEE;
-            const categoria = isNEE ? 'nee' : isPodium ? 'classificacao' : 'participacao';
-            if (tipo !== 'todos' && tipo !== categoria) return;
+            const adaptada = r.escalaoId === 'adaptada', isPodium = pos <= 3;
+            if (!incluirNoLoteCertificados(tipo,r,pos)) return;
             let tempoStr = formatarTempo(r.tempoProvaMs);
             
             let bgTarget = certBgPart;
@@ -9390,9 +9935,11 @@ function imprimirCertificados(opcoes = {}) {
             let bgHtml = bgTarget ? `<img class="cert-bg" src="${bgTarget}">` : '';
 
             let mainTitle = currentProva.tituloDorsal || 'CORTA-MATO ESCOLAR';
-            let subTitle = isPodium ? 'Certificado de Classificação Oficial' : isNEE ? 'Certificado de Participação · Prova Adaptada' : 'Certificado de Participação';
+            let subTitle = isPodium ? 'Certificado de Classificação Oficial' : 'Certificado de Participação';
+            if(adaptada)subTitle += ' · Prova Adaptada';
             let actionText = isPodium ? `Conquistou com distinção o <b>${pos}º Lugar</b> com o tempo final de <b>${tempoStr}</b>.` : `Concluiu a prova com sucesso com a marca de <b>${tempoStr}</b>.`;
-            if (pos >= 4 && pos <= 6) actionText += `<br><b>${pos}º lugar no escalão.</b>`;
+            if(adaptada)actionText = `Obteve o <b>${pos}.º lugar</b> na classificação conjunta da Prova Adaptada, com o tempo de <b>${tempoStr}</b>.`;
+            else if (pos >= 4 && pos <= 6) actionText += `<br><b>${pos}º lugar no escalão.</b>`;
             if (pos <= 6) actionText += `<br><strong class="cert-apuramento">${textoApuramentoCLDE(r,currentProva)}</strong>`;
 
             let cleanAno = cmAnoNum(r.ano);
@@ -9409,7 +9956,7 @@ function imprimirCertificados(opcoes = {}) {
                             <div class="cert-intro" style="font-size: 16pt; color: #64748b; margin-bottom: 5px;">Certificamos que o(a) aluno(a)</div>
                             <div class="cert-nome">${cmEsc(r.nome)}</div>
                             <div class="cert-details">
-                                Participou no escalão <b>${cmEsc(r.escalaoNome)}</b> em representação da turma <b>${cmEsc(turmaStr)}</b>.<br>
+                                ${adaptada?'Participou na':'Participou no escalão'} <b>${cmEsc(r.escalaoNome)}</b> em representação da turma <b>${cmEsc(turmaStr)}</b>.<br>
                                 <div class="cert-action">${actionText}</div>
                             </div>
                             <div class="cert-footer" style="margin-top: 25px; font-size: 14pt; color: #475569; font-weight: 600;">
@@ -9545,6 +10092,8 @@ function ordenarAlunosDistribuicaoDorsais(alunos,prova=currentProva){
  }).map(item=>item.aluno);
 }
 function sincronizarCriteriosDistribuicaoDorsais(){
+ const modo=document.getElementById('modo-numeracao'),chave=JSON.stringify([currentProva?.id,currentProva?.modoNumeracao||'sequencial']);
+ if(modo&&modo.dataset.prova!==chave){modo.value=currentProva?.modoNumeracao||'sequencial';modo.dataset.prova=chave;cmMostrarModoNumeracao();}
  const criterios=criteriosDistribuicaoDorsais();
  criterios.forEach((item,index)=>{const select=document.getElementById('distribuicao-criterio-'+(index+1)),order=document.getElementById('distribuicao-ordem-'+(index+1));if(!select||!order)return;select.replaceChildren();for(const [campo,label] of [['','Sem critério'],...Object.entries(CAMPOS_DISTRIBUICAO_DORSAIS)]){const option=document.createElement('option');option.value=campo;option.textContent=label;option.disabled=!!campo&&criterios.some((other,i)=>i!==index&&other.campo===campo);select.appendChild(option);}select.value=item.campo;order.value=item.ordem;select.disabled=!currentProva;order.disabled=!currentProva||!item.campo;});
  const resumo=document.getElementById('distribuicao-resumo');if(resumo)resumo.textContent='Ordem: '+(criterios.filter(item=>item.campo).map(item=>CAMPOS_DISTRIBUICAO_DORSAIS[item.campo]+(item.ordem==='desc'?' ↓':' ↑')).join(' → ')||'ordem atual dos alunos')+'. As escolhas ficam guardadas nesta prova.';
@@ -10145,8 +10694,11 @@ function setFundoCertAtual(background){
 function criarPreviewCertificado(){
  const page=document.createElement('div');page.className='cert-page cert-editavel';page.dataset.certType=certType;
  const background=fundoCertAtual();if(background)page.style.backgroundImage='url("'+background+'")';
- const eligible=resultadosClassificacao(currentProva).filter(r=>!r.desistencia&&!r.desqualificado).slice().sort((a,b)=>a.tempoProvaMs-b.tempoProvaMs);
- const aluno=eligible[certType==='part'?3:Number(certType)-1]||eligible[0]||currentProva?.participantes?.find(p=>p.ativo)||{nome:'Nome do aluno',escalaoNome:'Infantis B',ano:'5',turma:'A'};
+ const eligible=resultadosClassificacao(currentProva).filter(resultadoValidoParaCertificado).slice().sort((a,b)=>a.tempoProvaMs-b.tempoProvaMs);
+ const grupos=new Map();
+ for(const r of eligible){const id=r.escalaoId||r.escalaoNome;if(!grupos.has(id))grupos.set(id,[]);grupos.get(id).push(r);}
+ const indice=certType==='part'?3:Number(certType)-1;
+ const aluno=[...grupos.values()].map(grupo=>grupo[indice]).find(Boolean)||currentProva?.participantes?.find(p=>p.ativo)||{nome:'Nome do aluno',escalaoNome:'Infantis B',ano:'5',turma:'A'};
  const append=(className,text)=>{const el=document.createElement('div');el.className=className;el.textContent=text;page.appendChild(el);return el;};
  append('cert-title',currentProva?.tituloDorsal||'CORTA-MATO ESCOLAR');
  append('cert-subtitle',certType==='part'?'Certificado de Participação':'Certificado de Classificação Oficial');
@@ -10154,7 +10706,8 @@ function criarPreviewCertificado(){
  const details=append('cert-details','Participou no escalão '+(aluno.escalaoNome||'Infantis B')+' em representação da turma '+cmAnoTexto(cmAnoNum(aluno.ano||'5'))+' '+(aluno.turma||'A')+'.');
  const action=append('cert-action',certType==='part'?'Concluiu a prova com sucesso.':'Conquistou com distinção o '+certType+'º Lugar.');
  const rank=eligible.filter(r=>(r.escalaoId||r.escalaoNome||'Geral')===(aluno.escalaoId||aluno.escalaoNome||'Geral')).indexOf(aluno)+1;
- if(certType==='part'&&rank>=4&&rank<=6){action.appendChild(document.createElement('br'));const place=document.createElement('b');place.textContent=rank+'º lugar no escalão.';action.appendChild(place);}
+ if(aluno.escalaoId==='adaptada'&&rank)action.textContent='Obteve o '+rank+'.º lugar na classificação conjunta da Prova Adaptada.';
+ else if(certType==='part'&&rank>=4&&rank<=6){action.appendChild(document.createElement('br'));const place=document.createElement('b');place.textContent=rank+'º lugar no escalão.';action.appendChild(place);}
  if(rank>=1&&rank<=6){action.appendChild(document.createElement('br'));const qualification=document.createElement('strong');qualification.className='cert-apuramento';qualification.textContent=textoApuramentoCLDE(aluno,currentProva);action.appendChild(qualification);}
  append('cert-footer',currentProva?.nomeEscola||'A Organização');append('cert-data',currentProva?.dataProva?currentProva.dataProva.split('-').reverse().join('/'):'___/___/____');
  const assets=dorsalDraftAssets||currentProva?.certAssetsEditor?.[certType];
@@ -10725,7 +11278,15 @@ function ordemClassificacaoALF(id) {
     const index = ['infA','infB','ini','juv','jun','adaptada'].indexOf(base);
     return 20 + (genero === 'M' ? 10 : 0) + (index < 0 ? 6 : index);
 }
-function projetarClassificacaoALF(prova, aluno) {
+function pertenceAProvaAdaptada(aluno) {
+    const idAdaptado = /^(?:alf_)?(?:adaptada|nee)(?:_[MF])?$/i;
+    return aluno?.nee === true || idAdaptado.test(aluno?.escalaoCorridaId || '') || idAdaptado.test(aluno?.escalaoId || '') ||
+        /^(?:prova\s+)?(?:adaptada|nee)\b/i.test(aluno?.escalaoNome || '');
+}
+function projetarClassificacao(prova, aluno) {
+    if (pertenceAProvaAdaptada(aluno)) {
+        return {...aluno, nee:true, escalaoCorridaId:'adaptada', escalaoId:'adaptada', escalaoNome:'Prova Adaptada'};
+    }
     if (!temLimitacoesFuncionais(aluno)) return {...aluno};
     const origem = origemClassificacaoALF(prova, aluno);
     const genero = String(aluno.genero || (String(origem || aluno.escalaoId).endsWith('_F') ? 'F' : 'M')).toUpperCase().startsWith('F') ? 'F' : 'M';
@@ -10744,19 +11305,30 @@ function resultadosClassificacao(prova) {
         const candidato = porDorsal.get(String(r.dorsal));
         const aluno = candidato && (r.processo == null || String(candidato.processo) === String(r.processo)) ? candidato : null;
         const alf = aluno ? temLimitacoesFuncionais(aluno) : temLimitacoesFuncionais(r);
-        return projetarClassificacaoALF(prova, {...r, alf, limitacoesFuncionais:alf, genero:aluno?.genero || r.genero});
+        return projetarClassificacao(prova, {...r, nee:r.nee === true || (!r.escalaoCorridaId && !r.escalaoId && pertenceAProvaAdaptada(aluno)), alf, limitacoesFuncionais:alf, genero:aluno?.genero || r.genero});
     });
 }
 function participantesClassificacao(prova) {
-    return (prova?.participantes || []).filter(a => !a.voluntario).map(a => projetarClassificacaoALF(prova,a));
+    return (prova?.participantes || []).filter(a => !a.voluntario).map(a => projetarClassificacao(prova,a));
 }
 function configuracoesClassificacao(prova) {
     const configs = {...(prova?.escaloesConfig || {})};
     // Ignore any old combined classification entries without changing saved race settings.
     for (const id of Object.keys(configs)) if (id.startsWith('alf_')) delete configs[id];
+    const idsAdaptadosAntigos=Object.keys(configs).filter(id=>/^(?:nee(?:_[MF])?|adaptada_[MF])$/i.test(id));
+    if (!configs.adaptada) {
+        const antigas=idsAdaptadosAntigos.map(id=>configs[id]);
+        if (antigas.length) {
+            const ativas = antigas.filter(c=>c.ativo !== false), partidas=ativas.map(c=>c.horaArranqueMs).filter(Boolean);
+            configs.adaptada={...antigas[0],nome:'Prova Adaptada',ativo:!!ativas.length,
+                horaArranqueMs:partidas.length ? Math.min(...partidas) : null,
+                horaFimMs:ativas.length && ativas.every(c=>c.horaFimMs) ? Math.max(...ativas.map(c=>c.horaFimMs)) : null};
+        }
+    }
+    for(const id of idsAdaptadosAntigos)delete configs[id];
     const inscritos = participantesClassificacao(prova).filter(a => a.ativo !== false);
     for (const aluno of [...inscritos, ...resultadosClassificacao(prova)]) {
-        if (!temLimitacoesFuncionais(aluno) || configs[aluno.escalaoId]) continue;
+        if (!String(aluno.escalaoId).startsWith('alf_') || configs[aluno.escalaoId]) continue;
         const origem = prova?.escaloesConfig?.[aluno.escalaoCorridaId] || {};
         configs[aluno.escalaoId] = {...origem, nome:aluno.escalaoNome, alf:true,
             escalaoCorridaId:aluno.escalaoCorridaId, escalaoOrigemNome:aluno.escalaoOrigemNome,
@@ -10941,6 +11513,7 @@ function confirmarMapeamento() {
         if (problemas.length) { mensagemImportacaoCSV(''); cmMostrarRevisao(problemas,novosParticipantes.length,confirmarMapeamento); return; }
     }
     if (existentes && !confirm('A importação substitui a lista atual de '+existentes+' aluno(s) por '+novosParticipantes.length+' aluno(s) do CSV e volta a numerar os dorsais.'+(comResultados?'\n\nAtenção: esta prova já tem '+comResultados+' chegada(s) registada(s). Serão apagadas e os cronómetros voltam a zero, porque pertencem à lista antiga.':'')+'\n\nContinuar?')) {mensagemImportacaoCSV('Importação cancelada. A lista atual foi mantida.');return;}
+    if(currentProva.modoNumeracao==='processo'){const erro=cmValidarProcessosDorsais(novosParticipantes);if(erro){mensagemImportacaoCSV(erro,true);return;}}
     const anteriores = currentProva.participantes;
     CMConsentimento.preservarImportacao(novosParticipantes,anteriores);
     const resultadosAntes = currentProva.resultados, corridasAntes = JSON.stringify(currentProva.escaloesConfig || {}), tinhaCorridas = comResultados > 0 || Object.values(currentProva.escaloesConfig || {}).some(c => c.horaArranqueMs);
@@ -11071,7 +11644,8 @@ let observadorGestaoCM=null;
 function estadoSincronizacaoCSV(){return envioNuvemEmCursoCSV>0 || alteracoesParticipantesPendentesCSV.size>0;}
 function mostrarEstadoNuvemCSV(confirmado=true){
     if(ultimoErroEnvioCSV){atualizarStatusNuvem(ultimoErroEnvioCSV,'#fef2f2','#991b1b');return;}
-    const pendente=!confirmado || estadoSincronizacaoCSV();
+    const prefixo=prefixoPistaPendente+'['+JSON.stringify(obterUtilizadorAtual())+',';
+    const pendente=!confirmado || estadoSincronizacaoCSV() || Object.keys(localStorage).some(k=>k.startsWith(prefixo));
     atualizarStatusNuvem(pendente?'A sincronizar…':'Sincronizado',pendente?'#fffbeb':'#ecfdf5',pendente?'#92400e':'#065f46');
 }
 function enviarEstadoParaNuvem(){
@@ -11116,16 +11690,18 @@ function ativarListenersFirestore(db){
             }
             if(confirmado && alteracoesParticipantesPendentesCSV.size && !envioNuvemEmCursoCSV && !ultimoErroEnvioCSV)enviarEstadoParaNuvem();
         } else if(confirmado && appState.provas?.length && !envioNuvemEmCursoCSV && !ultimoErroEnvioCSV)enviarEstadoParaNuvem();
-        mostrarEstadoNuvemCSV(confirmado);if(confirmado){window.cmNuvemConfirmada=true;setTimeout(()=>cmAvaliarPrazoConsentimentos(true),0);}
+        mostrarEstadoNuvemCSV(confirmado);if(confirmado){enviarFinsPista();window.cmNuvemConfirmada=true;setTimeout(()=>cmAvaliarPrazoConsentimentos(true),0);}
     },error=>{
         ultimoErroEnvioCSV=error.code==='permission-denied'?'Permissão Negada':'Ligação Instável';mostrarEstadoNuvemCSV();
     });
 }
 function retomarDadosGestaoCM(){
+    enviarFinsPista();
     if(!window.listenerAtivo){const db=conectarFirebase();if(db)ativarListenersFirestore(db);}
     if(alteracoesParticipantesPendentesCSV.size && !envioNuvemEmCursoCSV)enviarEstadoParaNuvem();
 }
 window.addEventListener('online',retomarDadosGestaoCM);
+setInterval(()=>{if(!document.hidden)enviarFinsPista();},15000);
 window.addEventListener('pageshow',retomarDadosGestaoCM);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)retomarDadosGestaoCM();});
 window.addEventListener('storage',event=>{
@@ -11170,12 +11746,18 @@ function toggleParticipanteVoluntario(idx) {
         currentProva.resultados=(currentProva.resultados || []).filter(r=>!resultadoDoAluno(r));
         aluno.scans=[];aluno.dorsal='';
     }else{
+        if(currentProva.modoNumeracao==='processo'){
+            const erro=cmValidarProcessosDorsais(currentProva.participantes.map(a=>a===aluno?{...a,voluntario:false}:a));
+            if(erro){alert(erro);atualizarTabelaParticipantes();return;}
+            aluno.dorsal=String(aluno.processo).trim();
+        }else{
         const usados=new Set(currentProva.participantes.filter(a=>a!==aluno && !a.voluntario && a.dorsal).map(a=>String(a.dorsal)));
         const antigo=String(aluno._dorsalAntesVoluntario || '');
         const digitos=Number(currentProva.digitosDorsal) || Number(document.getElementById('digitos-dorsal').value) || 3;
         let numero=Number(currentProva.dorsalInicial) || Number(document.getElementById('dorsal-inicial').value) || 1;
         while([...usados].some(d=>Number(d)===numero))numero++;
         aluno.dorsal=antigo && ![...usados].some(d=>Number(d)===Number(antigo)) ? antigo : String(numero).padStart(digitos,'0');
+    }
     }
     aluno.voluntario=marcar;
     registarAlteracaoParticipantesCSV(currentProva);saveState(true);
@@ -12345,6 +12927,7 @@ const CMImpressao=(()=>{
   classificacoes:{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:10},
   'resultados-turma':{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:10},
   'podio-turmas':{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:10},
+  'relatorio-prova':{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:15},
   'declaracao-dt':{classe:'printing-classificacao',papel:'210mm 297mm',largura:210,margem:15},
   'entrega-dorsais':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10},'confirmacao-alunos':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10},'participantes-ciclo':{classe:'printing-conferencia',papel:'210mm 297mm',largura:210,margem:10}
  };
@@ -12365,7 +12948,14 @@ const CMImpressao=(()=>{
   if(typeof gerarDorsaisParaImpressao==='function')gerarDorsaisParaImpressao();
  }
  function imprimir(tipo){if(sessao)return;try{preparar(tipo);window.print();}catch(error){restaurar();throw error;}}
- window.addEventListener('beforeprint',()=>{if(!sessao && currentProva)preparar('dorsais');});
+ window.addEventListener('beforeprint',()=>{
+  if(sessao||!currentProva)return;
+  const dialog=document.querySelector('dialog.cm-balanco-preview[open]');
+  const folha=dialog?.querySelector('.cm-balanco-folha');
+  if(folha&&dialog.dataset.prova===String(currentProva.id)&&dialog.dataset.utilizador===obterUtilizadorAtual()&&podeAcederProva(currentProva)){
+   document.getElementById('print-area').replaceChildren(folha.cloneNode(true));preparar('relatorio-prova');
+  }else preparar('dorsais');
+ });
  window.addEventListener('afterprint',restaurar);
  return {imprimir,ocupado:()=>!!sessao};
 })();
@@ -12425,7 +13015,7 @@ async function alterarDesclassificacao(dorsal,processo,acao){
     const snapshot=await tx.get(ref);if(!snapshot.exists)throw Error('A prova ainda não foi sincronizada.');const data=snapshot.data(),p=(data.provas || []).find(p=>p.id===prova.id);validarContaPartilha(data,p);
     const out=CMFita.decidir(p,id,acao,{origem:'gestao',operacao});if(out.changed)tx.set(ref,CMConsentimento.estadoNuvem(data));return out.resultado;
    });
-   const atual=(appState.provas || []).find(p=>p.id===prova.id),local=atual?.resultados?.find(item=>CMFita.chave(atual,item)===id);if(local){local.desqualificado=resultado.desqualificado;local.fita={...resultado.fita};}try{localStorage.setItem('cortaMatoApp',JSON.stringify(appState));}catch{}
+   const atual=(appState.provas || []).find(p=>p.id===prova.id),local=atual?.resultados?.find(item=>CMFita.chave(atual,item)===id);if(acao==='repor'&&resultado.semChegadaAntesDSC&&atual){(atual.anulacoesDSC||={})[id]=true;atual.resultados=(atual.resultados||[]).filter(item=>CMFita.chave(atual,item)!==id);}else if(local){local.desqualificado=resultado.desqualificado;local.fita={...resultado.fita};}try{localStorage.setItem('cortaMatoApp',JSON.stringify(appState));}catch{}
   }else{resultado=CMFita.decidir(prova,id,acao,{origem:'gestao',operacao}).resultado;saveState(true);}
   if(currentProva?.id===prova.id){atualizarTabelaResultados();atualizarDisplayArranque();}
  }catch(error){alert(error.message || 'Não foi possível alterar a desclassificação.');}
@@ -12777,7 +13367,7 @@ window.CMPercurso=(()=>{
    {et:'documentos',t:'Imprimir certificados e relatórios',d:'Certificados, resultados, pódio das turmas e justificações de faltas.',feito:!!e&&e.imp.certificados,acao:['Abrir',()=>abrirEtapa('documentos')]}
   ];
  }
- const TIPOS_DOCUMENTOS=['autorizacoes','dorsais','entrega','confirmacao','ciclos','classificacoes','turma','podio','faltas','certificados'];
+ const TIPOS_DOCUMENTOS=['autorizacoes','dorsais','entrega','confirmacao','ciclos','classificacoes','turma','podio','faltas','certificados','relatorio-prova'];
  function feitoEtapa(id,e){if(!e)return false;return {provas:true,documentos:e.imp.dorsais&&e.imp.certificados,dorsais:e.alunos.length>0&&!e.semDorsal&&!e.semCorrida.length,consentimentos:e.doCiclo.length>0&&e.respondidos>=e.doCiclo.length||semAutorizacoes(e),cronometragem:e.corridas>0&&e.terminadas>=e.corridas}[id];}
  function textoEtapa(id,e){
   if(!e)return id==='provas'?'Por criar':'—';
@@ -13002,7 +13592,7 @@ window.CMPercurso=(()=>{
   const caixa=$('#dorsal-inicial')?.closest('.box');if(!caixa)return;let av=$('#cmp-aviso-digitos');
   if(!av){av=make('p','cmp-aviso');av.id='cmp-aviso-digitos';av.setAttribute('role','status');const linha=$('#digitos-dorsal')?.closest('.inputs-row');(linha||caixa.firstElementChild).after(av);}
   const dig=parseInt($('#digitos-dorsal')?.value)||3,ini=parseInt($('#dorsal-inicial')?.value)||1,n=e?e.alunos.filter(a=>!a.voluntario).length:0,ultimo=ini+n-1,precisa=String(Math.max(ultimo,1)).length;
-  av.hidden=!e||precisa<=dig;if(!av.hidden){const t='Com '+n+' alunos, o último dorsal é o '+ultimo+': precisa de '+precisa+' dígitos. Aumente «Dígitos do dorsal» para '+precisa+' para todos os dorsais terem o mesmo tamanho.';if(av.textContent!==t)av.textContent=t;}
+  av.hidden=!e||$('#modo-numeracao')?.value==='processo'||precisa<=dig;if(!av.hidden){const t='Com '+n+' alunos, o último dorsal é o '+ultimo+': precisa de '+precisa+' dígitos. Aumente «Dígitos do dorsal» para '+precisa+' para todos os dorsais terem o mesmo tamanho.';if(av.textContent!==t)av.textContent=t;}
  }
  // Ciclos: quais recebem autorização e, entre esses, em quais a prova é obrigatória.
  // Aqui contam-se autorizações, não participantes: quem participa só se sabe com as respostas (Dia da prova › Participantes por ciclo).
@@ -13306,6 +13896,52 @@ window.CMPercurso=(()=>{
  return {iniciar,atualizar:agendar,abrirEtapa,aviso,imprimirEmFalta,marcar:marcarImpresso,impressoEm:tipo=>{const p=prova();return p?lerImpressoes()[p.id]?.[tipo]||0:0;}};
 })();
 </script>
+<style id="cm-relatorio-prova-css">
+.cm-balanco-folha{box-sizing:border-box;color-scheme:light;background:#fff;color:#1e293b;font-size:11pt;line-height:1.46;overflow-wrap:anywhere;text-align:left}
+.cm-balanco-folha .cm-balanco-cabecalho{position:static;display:flex;align-items:flex-start;justify-content:space-between;gap:1.25em;height:auto;padding:0 0 .8em;margin:0 0 1.2em;background:transparent;color:inherit;border:0;border-bottom:2px solid var(--cor-relatorio);border-radius:0;box-shadow:none}
+.cm-balanco-folha h1{margin:0;font-family:inherit;font-size:22pt;font-weight:900;line-height:1.15;letter-spacing:0;text-transform:uppercase;color:var(--cor-relatorio)}
+.cm-balanco-folha h2{margin:1.15em 0 .35em;font-family:inherit;font-weight:700;font-size:13pt;line-height:1.24;color:var(--cor-relatorio);break-after:avoid;page-break-after:avoid}
+.cm-balanco-folha p{margin:.65em 0;color:inherit;font:inherit;orphans:3;widows:3}
+.cm-balanco-folha .cm-balanco-nome{margin:.3em 0 0;font-size:13pt;font-weight:700}
+.cm-balanco-folha .cm-balanco-escola,.cm-balanco-cabecalho time{margin:.2em 0 0;color:#475569;font-size:10pt;font-weight:600}
+.cm-balanco-cabecalho time{flex:none;text-align:right}
+.cm-balanco-grafico{margin:1em 0 1.2em;padding:.85em 0;border:0;border-block:1px solid #d7dfe6;background:#fff;break-inside:avoid;page-break-inside:avoid}
+.cm-balanco-grafico figcaption{font-weight:700;margin-bottom:.6em;color:var(--cor-relatorio)}
+.cm-balanco-serie{display:grid;grid-template-columns:minmax(6em,1.15fr) minmax(2em,2fr) minmax(5em,auto);align-items:center;gap:.6em;margin:.36em 0;font-size:.92em}
+.cm-balanco-serie strong{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cm-balanco-barra{display:block;height:.7em;background:#e8edf0}
+.cm-balanco-barra i{display:block;height:100%;background:var(--cor-relatorio)}
+.cm-balanco-grafico small{display:block;margin-top:.65em;font-size:9pt;line-height:1.35;color:#475569}
+.cm-balanco-folha .cm-balanco-nota{white-space:pre-line}
+.cm-balanco-assinatura{display:flex;flex-wrap:wrap;align-items:flex-end;gap:5mm;margin:7mm 0 0;break-inside:avoid;page-break-inside:avoid}
+.cm-balanco-assinatura .cmd-logos{flex:1 1 50mm;min-width:0;flex-wrap:wrap;justify-content:flex-start}
+.cm-balanco-assinatura img{max-height:12mm;max-width:32mm;object-fit:contain}
+.cm-balanco-signatario{margin-left:auto;width:min(70mm,100%);padding-top:15mm;text-align:center;color:#475569;font-size:10pt}
+.cm-balanco-signatario .cmd-assinatura{min-width:0;border-top:1px solid #64748b;padding-top:2mm}
+.cm-balanco-data-assinatura{margin-top:3mm}
+@media screen{
+ .cmd-pos-prova-acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+ .cmd-pos-prova-acoes>.btn{margin:0!important}
+ .cm-balanco-dialog textarea{resize:vertical}
+ .cmd-dlg.cm-balanco-preview{width:min(840px,calc(100vw - 24px));background:#fff;color:#1e293b;color-scheme:light;box-shadow:none}
+ .cmd-dlg.cm-balanco-preview h3{color:#1e293b}
+ .cm-balanco-preview::backdrop{background:rgba(100,116,139,.28)}
+ .cm-balanco-preview .cmd-dlg-bts{margin:0 0 14px}
+ .cm-balanco-preview .cm-balanco-folha{padding:clamp(8px,3vw,28px);border:0;box-shadow:none}
+}
+@media screen and (max-width:580px){
+ .cm-balanco-folha .cm-balanco-cabecalho{display:block}
+ .cm-balanco-cabecalho time{display:block;text-align:left;margin-top:.5em}
+}
+@page cm-balanco{size:A4 portrait;margin:15mm;background:white;@bottom-center{content:"Página " counter(page) " de " counter(pages);font:9pt Arial,sans-serif;color:#64748b}}
+@media print{
+ html:has(body[data-impressao-cm="relatorio-prova"]),body[data-impressao-cm="relatorio-prova"],body[data-impressao-cm="relatorio-prova"] #print-area,body[data-impressao-cm="relatorio-prova"] #print-area>.cm-balanco-folha{page:cm-balanco!important;color-scheme:only light!important;background:#fff!important;border:0!important;outline:0!important;border-radius:0!important;box-shadow:none!important;filter:none!important}
+ body[data-impressao-cm="relatorio-prova"] dialog,body[data-impressao-cm="relatorio-prova"] dialog::backdrop{display:none!important;background:transparent!important}
+ #print-area>.cm-balanco-folha{width:100%;margin:0;padding:0;overflow:visible}
+ .cm-balanco-folha{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .cm-balanco-folha .cm-balanco-fecho>:last-child{break-after:avoid;page-break-after:avoid}
+}
+</style>
 <style id="cm-documentos-css">
 /* Folhas dos documentos: papel real nos dois temas, no ecrã e na impressão.
    «contain» torna cada folha indivisível: sem ele, o navegador reparte pelas páginas os blocos que só ficam

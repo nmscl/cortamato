@@ -10393,7 +10393,7 @@ const CMPartilhaResultados=(()=>{
  function projetar(prova){
   const alunos=prova.participantes || [],voluntarios=alunos.filter(a=>a.voluntario),porDorsal=new Map(alunos.map((a,i)=>[String(a.dorsal),{a,i}]));
   const out=campos(prova,['id','nome','nomeEscola','tituloDorsal','anoLetivo','dataProva']);
-  out.escaloesConfig=Object.fromEntries(Object.entries(prova.escaloesConfig || {}).map(([id,cfg])=>[id,campos(cfg,['nome','ativo','voltas','distanciaMetros','horaArranqueMs','horaFimMs','reinicioMs','anoMin','anoMax'])]));
+  out.escaloesConfig=Object.fromEntries(Object.entries(prova.escaloesConfig || {}).map(([id,cfg])=>[id,campos(cfg,['nome','ativo','voltas','distanciaMetros','horaArranqueMs','horaFimMs','reinicioMs','revisaoPista','anoMin','anoMax'])]));
   // Process numbers become local join keys. Unclassified pupils contribute only
   // category/count data; the public document contains no account or consent data.
   out.participantes=alunos.flatMap((a,i)=>a.voluntario?[]:[{...campos(a,['dorsal','ano','turma','escalaoId','genero','ativo','alf','nee','limitacoesFuncionais']),processo:'p'+i}]);
@@ -11156,6 +11156,10 @@ const CMConsentimentoOMR=(()=>{
 const firebaseConfig = {apiKey:'AIzaSyCjIzuSpPzQwBs0HIh4HI5ckL63IGzNzVk',authDomain:'cmescolar-2bb14.firebaseapp.com',projectId:'cmescolar-2bb14',storageBucket:'cmescolar-2bb14.firebasestorage.app',messagingSenderId:'9382920751',appId:'1:9382920751:web:34abfe191a0f56f9203cda'};
 let estadoConsentimentos={provas:[]},dbConsentimentos=null,refConsentimentos=null,provaConsentimentos='',acessoConsentimentos=null,capturaConsentimento=null,streamConsentimentos=null,timerConsentimentos=null,aGuardarConsentimento=false,ligacaoConsentimentos=false;
 let dadosCarregadosConsentimentos=false,aValidarPasswordConsentimentos=false,tentativaPasswordConsentimentos=0;
+const chaveSessaoConsentimentos='cm.sessao.consentimentos.'+(new URLSearchParams(location.search).get('prova')||'');
+function guardarSessaoConsentimentos(acesso){
+ try{if(acesso)sessionStorage.setItem(chaveSessaoConsentimentos,JSON.stringify(acesso));else sessionStorage.removeItem(chaveSessaoConsentimentos);}catch{}
+}
 const filaConsentimentos=[];
 let analiseEmCursoConsentimentos=false,ultimaEtiquetaConsentimentos='',quadrosSemQRConsentimentos=0,ultimaConfirmacaoConsentimentos=0;
 let turmaConsentimentosProvaId='';
@@ -11175,6 +11179,17 @@ function atualizarDadosConsentimentos(data){
  if(capturaConsentimento && !limpezaCapturaConsentimentoValida(capturaConsentimento))proximoConsentimento(true);
  if(limpezaAlterada){ultimaEtiquetaConsentimentos='';feedbackConsentimentos('Registos de consentimento limpos','As leituras anteriores foram apagadas na gestão. Pode voltar a ler os documentos.');}
  dadosCarregadosConsentimentos=true;
+ if(!provaConsentimentos&&!aValidarPasswordConsentimentos){
+  try{
+   const anterior=JSON.parse(sessionStorage.getItem(chaveSessaoConsentimentos)||'null');
+   const config=anterior&&configuracaoAcessoConsentimentos(data,anterior.provaId);
+   const scope=new URLSearchParams(location.search).get('prova');
+   if(config&&(!scope||scope===anterior.provaId)&&anterior.hash===config.hash&&anterior.versao===Number(config.versao||1)){
+    acessoConsentimentos=anterior;provaConsentimentos=anterior.provaId;
+    ce('camera-idle').textContent='Inicie a câmara ou escolha uma fotografia com o QR e as duas caixas.';
+   }else if(config)guardarSessaoConsentimentos(null);
+  }catch{}
+ }
  if(provaConsentimentos && !acessoValidoConsentimentos())bloquearLeitorConsentimentos('O acesso expirou. Introduza novamente a password do leitor.');
  atualizarAcessoLeitorConsentimentos();processarFilaConsentimentos();
 }
@@ -11215,6 +11230,7 @@ function renderFaltasTurmaConsentimentos(){
  if(pendentes.length)ce('class-pending-hint').textContent=pendentes.length+' leitura(s) já recebida(s), a aguardar sincronização. Mantenha o leitor aberto até concluir o envio.';
 }
 function bloquearLeitorConsentimentos(mensagem=''){
+ guardarSessaoConsentimentos(null);
  tentativaPasswordConsentimentos++;aValidarPasswordConsentimentos=false;provaConsentimentos='';acessoConsentimentos=null;capturaConsentimento=null;pararCameraConsentimentos();
  ce('password').value='';ce('password-error').textContent=mensagem;ce('capture-panel').hidden=true;ce('aluno-lido').textContent='';ce('aluno-turma').textContent='';ce('resposta-lida').textContent='';ce('motivo').value='';ce('photo').value='';ce('capture-preview').width=0;ce('capture-preview').height=0;
  clearTimeout(flashConsentimentoTimer);document.body.classList.remove('consent-scan-success');ce('camera-idle').textContent='Valide a password para iniciar.';atualizarAcessoLeitorConsentimentos();ce('password').focus();
@@ -11233,7 +11249,7 @@ async function validarPasswordConsentimentos(event){
   const validas=correspondencias.filter(a=>{if(!a)return false;const atual=configuracaoAcessoConsentimentos(estadoConsentimentos,a.provaId);return atual?.hash===a.hash && Number(atual.versao || 1)===a.versao;});
   if(!validas.length)throw Error('Password incorreta ou acesso indisponível. Utilize a password do leitor definida na gestão.');
   if(validas.length!==1)throw Error('Esta password está associada a mais do que uma prova. Defina uma password diferente para cada leitor na gestão.');
-  acessoConsentimentos=validas[0];provaConsentimentos=acessoConsentimentos.provaId;ce('password').value='';ce('camera-idle').textContent='Inicie a câmara ou escolha uma fotografia com o QR e as duas caixas.';feedbackConsentimentos('Leitor disponível','Enquadre toda a área de resposta do documento.');
+  acessoConsentimentos=validas[0];guardarSessaoConsentimentos(acessoConsentimentos);provaConsentimentos=acessoConsentimentos.provaId;ce('password').value='';ce('camera-idle').textContent='Inicie a câmara ou escolha uma fotografia com o QR e as duas caixas.';feedbackConsentimentos('Leitor disponível','Enquadre toda a área de resposta do documento.');
  }catch(error){if(tentativa===tentativaPasswordConsentimentos){ce('password-error').textContent=error.message;ce('password').focus();}}
  finally{if(tentativa===tentativaPasswordConsentimentos){aValidarPasswordConsentimentos=false;atualizarAcessoLeitorConsentimentos();processarFilaConsentimentos();}}
 }
@@ -11684,5 +11700,119 @@ window.CMPercursoLeitor=(()=>{
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',iniciar);else iniciar();
  return {iniciar,atualizar:agendar};
 })();
-</script></body><!-- __EOF_INTEGRITY_CHECK_PASSED_2026__ -->
+</script><style id="cm-consent-ecra">
+/* Telemóveis de 390-460 px: a faixa de créditos passa a duas linhas em vez de cortar o texto. */
+@media(max-width:460px){body.cmp.visual-reader.visual-v2{--h-credit:44px}body.cmp.visual-reader.visual-v2 footer.credit-bar{white-space:normal;line-height:16px!important;font-size:11.5px!important;padding:5px 10px!important}body.cmp.visual-reader.visual-v2 footer.credit-bar .credit-sep{margin:0 4px}}
+
+/* TELEMÓVEL · com a câmara ligada, o leitor ocupa o ecrã inteiro (acima da faixa de créditos). */
+.consent-ecra-topo{display:none}
+html:has(body.consent-ecra),body.cmp.visual-reader.visual-v2.consent-ecra{overflow:hidden!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #camera{position:fixed!important;inset:0 0 calc(var(--h-credit,40px) + env(safe-area-inset-bottom,0px)) 0!important;z-index:6000;min-height:0!important;margin:0!important;border:0!important;border-radius:0!important;background:#000!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #camera video{width:100%!important;height:100%!important;max-height:none!important;object-fit:cover!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #camera .visual-camera-guide{inset:18% 7% 34%!important;border:2px dashed #ffffff59!important;border-radius:18px!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #camera .visual-camera-guide::before,body.cmp.visual-reader.visual-v2.consent-ecra #camera .visual-camera-guide::after{width:38px!important;height:38px!important;border-color:#ffd76a!important}
+body.cmp.visual-reader.visual-v2.consent-ecra .consent-ecra-topo{position:absolute;z-index:2;inset:0 0 auto;display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top,0px)) 12px 22px;background:linear-gradient(180deg,#000000c7,#0000);color:#fff}
+.consent-ecra-titulo{flex:1;min-width:0;display:grid;gap:2px}
+.consent-ecra-titulo strong{color:#fff;font:800 17px/1.2 var(--f-body,system-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.consent-ecra-titulo span{color:#d6deea;font:600 13px/1.3 var(--f-body,system-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.cmp.visual-reader.visual-v2.consent-ecra #camera .consent-ecra-parar{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:0;padding:0 16px!important;border:1.5px solid #ffffffb3!important;border-radius:999px!important;background:#00000073!important;color:#fff!important;font:700 15px var(--f-body,system-ui)!important;box-shadow:none!important;cursor:pointer}
+body.cmp.visual-reader.visual-v2.consent-ecra #camera .consent-ecra-parar svg{color:#fff!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #camera .consent-ecra-parar:focus-visible{outline:3px solid #ffd76a;outline-offset:2px}
+
+/* Resultado da leitura: cartão por cima da imagem, sempre à vista */
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback{position:fixed!important;z-index:6001;left:10px;right:10px;bottom:calc(var(--h-credit,40px) + env(safe-area-inset-bottom,0px) + 10px);margin:0!important;max-height:34dvh;overflow:auto;padding:14px 16px!important;border:1px solid #ffffff2e!important;border-left:6px solid #ffffff73!important;border-radius:16px!important;background:#0b1424e6!important;color:#fff!important;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 30px #0009!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback #feedback-title{margin:0 0 4px!important;color:#fff!important;font-size:21px!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback #feedback-detail{margin:0!important;color:#dbe3ef!important;font-size:15px!important;line-height:1.4}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback #sync-status{margin:6px 0 0!important;color:#b9c6d8!important;font-size:13px!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback #sync-status:empty{display:none}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback:has(#feedback-title.success){border-left-color:#3ddc97!important;background:#06281ce6!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback:has(#feedback-title.success) #feedback-title{color:#7cf2c0!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback:has(#feedback-title.error){border-left-color:#ff6b5e!important;background:#300e0be6!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback:has(#feedback-title.error) #feedback-title{color:#ffaaa1!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #feedback #retry-save:not([hidden]){margin-top:10px}
+
+/* Confirmar SIM / NÃO e motivo: folha que sobe do fundo, por cima da câmara */
+body.cmp.visual-reader.visual-v2.consent-ecra:has(#capture-panel:not([hidden])) #feedback{display:none!important}
+body.cmp.visual-reader.visual-v2.consent-ecra #capture-panel:not([hidden]){position:fixed!important;z-index:6002;left:0;right:0;bottom:calc(var(--h-credit,40px) + env(safe-area-inset-bottom,0px));max-height:calc(100dvh - var(--h-credit,40px) - 76px);overflow:auto;overscroll-behavior:contain;margin:0!important;padding:18px 16px 16px!important;border:0!important;border-radius:20px 20px 0 0!important;box-shadow:0 -12px 40px #000b!important;animation:consent-folha .28s cubic-bezier(.2,.8,.2,1)}
+body.cmp.visual-reader.visual-v2.consent-ecra #capture-panel #capture-preview{width:auto!important;max-width:100%!important;max-height:24dvh!important;margin:10px auto!important}
+@keyframes consent-folha{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+@media(prefers-reduced-motion:reduce){body.cmp.visual-reader.visual-v2.consent-ecra #capture-panel:not([hidden]){animation:none}}
+</style>
+<script id="cm-consent-ecra-js">
+/* Telemóvel: com a câmara ligada, o leitor de autorizações ocupa o ecrã inteiro. Só apresentação. */
+(()=>{
+ const ce=id=>document.getElementById(id);
+ const telemovel=matchMedia('(max-width: 900px), (pointer: coarse)');
+ let topo=null,nomeProva=null,subtitulo=null,botaoParar=null,emEcra=false,pedimosEcraNavegador=false;
+ const cameraLigada=()=>{const v=ce('video');return !!v&&!v.hidden;};
+ function textoTurma(){
+  const ano=ce('reader-ano')?.value,turma=ce('reader-turma')?.value;
+  if(!ano||!turma)return 'Aponte para o QR e as caixas SIM / NÃO';
+  const falta=Number(ce('class-missing')?.textContent||0);
+  return 'Ano '+ano+' · Turma '+turma+' · '+(falta?falta+(falta===1?' autorização em falta':' autorizações em falta'):'nenhuma em falta');
+ }
+ function atualizarTextos(){
+  if(!topo)return;
+  nomeProva.textContent=ce('proof-name')?.textContent||'Ler autorizações';
+  subtitulo.textContent=textoTurma();
+ }
+ function criarTopo(){
+  const camera=ce('camera');if(!camera||topo)return;
+  topo=document.createElement('div');topo.className='consent-ecra-topo';
+  const titulo=document.createElement('div');titulo.className='consent-ecra-titulo';
+  nomeProva=document.createElement('strong');subtitulo=document.createElement('span');titulo.append(nomeProva,subtitulo);
+  botaoParar=document.createElement('button');botaoParar.type='button';botaoParar.className='consent-ecra-parar';
+  // Ícone próprio: com um SVG lá dentro, a camada visual da página não troca o ícone.
+  botaoParar.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg>';
+  botaoParar.append(document.createTextNode('Parar'));
+  botaoParar.setAttribute('aria-label','Parar a câmara');
+  botaoParar.addEventListener('click',()=>window.pararCameraConsentimentos?.());
+  topo.append(titulo,botaoParar);camera.append(topo);
+ }
+ function sairEcraNavegador(){
+  if(pedimosEcraNavegador&&document.fullscreenElement)document.exitFullscreen?.().catch(()=>{});
+  pedimosEcraNavegador=false;
+ }
+ function aplicar(){
+  const deve=cameraLigada()&&telemovel.matches;
+  if(deve===emEcra){if(deve)atualizarTextos();return;}
+  emEcra=deve;document.body.classList.toggle('consent-ecra',deve);
+  if(deve){
+   atualizarTextos();
+   // O botão «Voltar» do telemóvel fecha a câmara em vez de sair do leitor.
+   try{if(!window.history.state?.consentEcra)window.history.pushState({...(window.history.state||{}),consentEcra:true},'');}catch{}
+   if(!ce('capture-panel')||ce('capture-panel').hidden)botaoParar?.focus({preventScroll:true});
+  }else{
+   sairEcraNavegador();
+   try{if(window.history.state?.consentEcra)window.history.back();}catch{}
+   ce('start')?.focus({preventScroll:true});
+  }
+ }
+ window.addEventListener('popstate',()=>{if(emEcra&&cameraLigada())window.pararCameraConsentimentos?.();});
+ // O ecrã inteiro do navegador tem de ser pedido no próprio toque em «Iniciar câmara».
+ const iniciarOriginal=window.iniciarCameraConsentimentos;
+ if(typeof iniciarOriginal==='function'){
+  window.iniciarCameraConsentimentos=async function(...args){
+   let pode=false;try{pode=acessoValidoConsentimentos()&&!capturaConsentimento;}catch{}
+   if(pode&&telemovel.matches&&!document.fullscreenElement&&document.documentElement.requestFullscreen){
+    pedimosEcraNavegador=true;
+    document.documentElement.requestFullscreen({navigationUI:'hide'}).catch(()=>{pedimosEcraNavegador=false;});
+   }
+   try{return await iniciarOriginal.apply(this,args);}
+   finally{if(!cameraLigada())sairEcraNavegador();}
+  };
+ }
+ function iniciar(){
+  criarTopo();
+  const video=ce('video');if(!video)return;
+  new MutationObserver(aplicar).observe(video,{attributes:true,attributeFilter:['hidden']});
+  for(const id of ['proof-name','class-missing','class-summary']){const n=ce(id);if(n)new MutationObserver(atualizarTextos).observe(n,{childList:true,characterData:true,subtree:true});}
+  ce('reader-ano')?.addEventListener('change',atualizarTextos);ce('reader-turma')?.addEventListener('change',atualizarTextos);
+  telemovel.addEventListener?.('change',aplicar);
+  aplicar();
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',iniciar);else iniciar();
+})();
+</script>
+</body><!-- __EOF_INTEGRITY_CHECK_PASSED_2026__ -->
 </html>
