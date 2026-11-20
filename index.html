@@ -107,22 +107,144 @@ function cmConfirmarRestauro(novo){
 }
 
 // ---------- Gravação local ----------
-let cmGravacaoFalhou=false;
-function cmGravarLocal(estado){
+// A cópia completa da gestão (com as imagens dos desenhos) fica no IndexedDB, que tem espaço de sobra.
+// No localStorage (cerca de 5 MB) fica só uma cópia leve, igual à que vai para a nuvem, sem as imagens grandes:
+// é essa que o quadro ao vivo, o leitor e as outras janelas abertas leem.
+const CM_IDB_NOME='cortaMatoGestao',CM_IDB_LOJA='dados',CM_CHAVE_ESTADO='cortaMatoApp',CM_MARCA_LEVE='{"_copiaLeve":';
+let cmGravacaoFalhou=false,cmIDBDisponivel=typeof indexedDB!=='undefined',cmIDBAberta=null,cmIDBLigacao=null;
+// Modelos de desenho e cópias antigas que saíram do localStorage (chave → texto).
+const cmLegadoLocal=new Map();
+function cmAbrirIDB(){
+ if(!cmIDBDisponivel)return Promise.reject(Error('IndexedDB indisponível'));
+ return cmIDBAberta||(cmIDBAberta=new Promise((ok,falha)=>{
+  let pedido;try{pedido=indexedDB.open(CM_IDB_NOME,1);}catch(erro){falha(erro);return;}
+  pedido.onupgradeneeded=()=>{if(!pedido.result.objectStoreNames.contains(CM_IDB_LOJA))pedido.result.createObjectStore(CM_IDB_LOJA);};
+  pedido.onsuccess=()=>{const db=pedido.result;db.onversionchange=()=>{db.close();cmIDBAberta=cmIDBLigacao=null;};cmIDBLigacao=db;ok(db);};
+  pedido.onerror=()=>falha(pedido.error||Error('IndexedDB'));
+  pedido.onblocked=()=>falha(Error('IndexedDB bloqueado por outra janela'));
+ }).catch(erro=>{cmIDBAberta=null;throw erro;}));
+}
+function cmIDBPedido(modo,fazer){
+ return cmAbrirIDB().then(db=>new Promise((ok,falha)=>{
+  const tx=db.transaction(CM_IDB_LOJA,modo),pedido=fazer(tx.objectStore(CM_IDB_LOJA));
+  tx.oncomplete=()=>ok(pedido?.result);tx.onerror=()=>falha(tx.error||Error('IndexedDB'));tx.onabort=()=>falha(tx.error||Error('IndexedDB: gravação anulada'));
+ }));
+}
+const cmIDBLer=chave=>cmIDBPedido('readonly',loja=>loja.get(chave));
+const cmIDBGravar=(chave,valor)=>cmIDBPedido('readwrite',loja=>loja.put(valor,chave));
+function cmIDBComPrefixo(prefixo){
+ return cmAbrirIDB().then(db=>new Promise((ok,falha)=>{
+  const lista=[],tx=db.transaction(CM_IDB_LOJA,'readonly'),cursor=tx.objectStore(CM_IDB_LOJA).openCursor(IDBKeyRange.bound(prefixo,prefixo+'￿'));
+  cursor.onsuccess=()=>{const c=cursor.result;if(c){lista.push([c.key,c.value]);c.continue();}};
+  tx.oncomplete=()=>ok(lista);tx.onerror=()=>falha(tx.error||Error('IndexedDB'));
+ }));
+}
+// Arranque: a cópia do IndexedDB é lida antes de a gestão começar. O arranque espera por ela (no máximo 3 segundos).
+const cmEstadoLocal={texto:null,pronto:false,escrito:false};
+cmEstadoLocal.promessa=(async()=>{
  try{
-  localStorage.setItem('cortaMatoApp',JSON.stringify(estado));
+  await Promise.race([new Promise(r=>setTimeout(r,3000)),(async()=>{
+   const [texto,legado]=await Promise.all([cmIDBLer(CM_CHAVE_ESTADO),cmIDBComPrefixo('ls:')]);
+   if(typeof texto==='string'&&!cmEstadoLocal.escrito)cmEstadoLocal.texto=texto;
+   for(const [chave,valor] of legado)if(!cmLegadoLocal.has(chave.slice(3)))cmLegadoLocal.set(chave.slice(3),valor);
+  })()]);
+ }catch(erro){console.warn('Cópia local no IndexedDB indisponível; a gestão usa só o localStorage.',erro);cmIDBDisponivel=false;}
+ cmEstadoLocal.pronto=true;
+})();
+(function(){
+ const segurar=evento=>{
+  if(cmEstadoLocal.pronto)return;
+  evento.stopImmediatePropagation();window.removeEventListener('DOMContentLoaded',segurar,true);
+  cmEstadoLocal.promessa.then(()=>document.dispatchEvent(new Event('DOMContentLoaded',{bubbles:true})));
+ };
+ window.addEventListener('DOMContentLoaded',segurar,true);
+})();
+// O texto do estado guardado neste navegador, para o arranque e para o início de sessão.
+function cmTextoEstadoLocal(){
+ let local=null;try{local=localStorage.getItem(CM_CHAVE_ESTADO);}catch{}
+ // Uma cópia completa no localStorage foi gravada por uma versão antiga da gestão (ou sem IndexedDB): é a mais recente.
+ if(local&&!local.startsWith(CM_MARCA_LEVE))return local;
+ return cmEstadoLocal.texto||local;
+}
+// Cópia leve: o estado como vai para a nuvem, sem as imagens grandes (essas ficam na nuvem e no IndexedDB).
+function cmCopiaLeve(estado){
+ const SEM_IMAGENS=new Set(['participantes','resultados','escaloesConfig','consentimentos','consentimentosLimpos','_editorRefs']);
+ const pesada=v=>{if(v==null)return false;const t=typeof v==='string'?v:typeof v==='object'?JSON.stringify(v):'';return t.length>12000&&t.includes('data:image/');};
+ const leve={_copiaLeve:1,...estado};
+ for(const campo of Object.keys(leve))if(/^modelos[A-Z]/.test(campo)&&leve[campo]&&JSON.stringify(leve[campo]).length>12000)delete leve[campo];
+ leve.provas=(estado?.provas||[]).map(prova=>{
+  const p={...prova};
+  for(const [campo,valor] of Object.entries(prova))if(!SEM_IMAGENS.has(campo)&&pesada(valor))delete p[campo];
+  return p;
+ });
+ return leve;
+}
+function cmGravarCopiaLeve(estado){
+ try{localStorage.setItem(CM_CHAVE_ESTADO,JSON.stringify(cmCopiaLeve(estado)));}
+ catch(erro){console.warn('A cópia leve não coube no localStorage.',erro);try{localStorage.removeItem(CM_CHAVE_ESTADO);}catch{}}
+}
+// Como antes: tudo no localStorage. Só se usa quando o IndexedDB não está disponível.
+function cmGravarLocalStorage(texto){
+ try{
+  localStorage.setItem(CM_CHAVE_ESTADO,texto);
   if(cmGravacaoFalhou){cmGravacaoFalhou=false;CMAvisos.mostrar('cm-aviso-gravacao','');}
   return true;
  }catch(erro){
   console.error(erro);cmGravacaoFalhou=true;
-  CMAvisos.mostrar('cm-aviso-gravacao','Não foi possível guardar neste navegador: o armazenamento está cheio. As últimas alterações podem perder-se. Guarde uma cópia de segurança e remova fundos ou logótipos que já não use.');
+  CMAvisos.mostrar('cm-aviso-gravacao','Não foi possível guardar neste navegador: o armazenamento está cheio. Com ligação à internet, as alterações continuam a ir para a nuvem. Guarde uma cópia de segurança e remova fundos ou logótipos que já não use.');
   window.atualizarStatusNuvem?.('Não guardado neste navegador','#fdf0ee','#c2362b','#c2362b');
   return false;
  }
 }
+// As gravações vão para o IndexedDB por ordem; se houver várias seguidas, grava-se só a mais recente.
+let cmGravacaoEmCurso=null,cmGravacaoPendente=null;
+async function cmCicloGravacao(){
+ while(cmGravacaoPendente){
+  const {texto,estado}=cmGravacaoPendente;cmGravacaoPendente=null;
+  if(!cmIDBDisponivel){cmGravarLocalStorage(texto);continue;}
+  try{
+   await cmIDBGravar(CM_CHAVE_ESTADO,texto);
+   if(!cmGravacaoPendente)cmGravarCopiaLeve(estado);
+   if(cmGravacaoFalhou){cmGravacaoFalhou=false;CMAvisos.mostrar('cm-aviso-gravacao','');}
+  }catch(erro){
+   console.error('Não foi possível gravar no IndexedDB; a gestão volta a gravar no localStorage.',erro);
+   cmIDBDisponivel=false;cmGravarLocalStorage(cmGravacaoPendente?.texto||texto);cmGravacaoPendente=null;
+  }
+ }
+}
+function cmGravarLocal(estado){
+ let texto;try{texto=JSON.stringify(estado);}catch(erro){console.error(erro);return false;}
+ cmEstadoLocal.texto=texto;cmEstadoLocal.escrito=true;
+ if(!cmIDBDisponivel)return cmGravarLocalStorage(texto);
+ cmGravacaoPendente={texto,estado};
+ if(!cmGravacaoEmCurso)cmGravacaoEmCurso=cmCicloGravacao().finally(()=>{cmGravacaoEmCurso=null;});
+ return true;
+}
+// Ao fechar a página com uma gravação por fazer, entrega-a já ao IndexedDB.
+window.addEventListener('pagehide',()=>{
+ const pendente=cmGravacaoPendente;if(!pendente||!cmIDBLigacao)return;
+ cmGravacaoPendente=null;try{cmIDBLigacao.transaction(CM_IDB_LOJA,'readwrite').objectStore(CM_IDB_LOJA).put(pendente.texto,CM_CHAVE_ESTADO);}catch(erro){console.error(erro);}
+});
+// Modelos de desenho da conta e cópias à parte: no IndexedDB, para não ocuparem o localStorage.
+function cmGuardarLegado(chave,texto){
+ cmLegadoLocal.set(chave,texto);
+ if(!cmIDBDisponivel){try{localStorage.setItem(chave,texto);}catch(erro){console.error(erro);}return;}
+ try{localStorage.removeItem(chave);}catch{}
+ cmIDBGravar('ls:'+chave,texto).catch(erro=>{console.error(erro);try{localStorage.setItem(chave,texto);}catch{}});
+}
+// Uma vez: passa para o IndexedDB os modelos e as cópias que versões antigas deixaram no localStorage.
+cmEstadoLocal.promessa.then(async()=>{
+ if(!cmIDBDisponivel)return;
+ let chaves=[];try{chaves=Object.keys(localStorage).filter(k=>/^cortaMatoModelos|^cortaMatoIlegivel_/.test(k));}catch{return;}
+ for(const chave of chaves){
+  let texto=null;try{texto=localStorage.getItem(chave);}catch{}
+  if(texto==null)continue;
+  try{await cmIDBGravar('ls:'+chave,texto);if(!cmLegadoLocal.has(chave))cmLegadoLocal.set(chave,texto);localStorage.removeItem(chave);}
+  catch(erro){console.warn('Não foi possível mover '+chave+' para o IndexedDB.',erro);return;}
+ }
+});
 function cmDadosIlegiveis(texto){
- const chave='cortaMatoIlegivel_'+Date.now();
- try{localStorage.setItem(chave,texto);}catch(erro){console.error(erro);}
+ cmGuardarLegado('cortaMatoIlegivel_'+Date.now(),texto);
  CMAvisos.mostrar('cm-aviso-dados','Os dados guardados neste navegador estão ilegíveis, por isso a plataforma abriu vazia. Ficou uma cópia guardada à parte. Restaure uma cópia de segurança em Menu › Restaurar cópia de segurança ou aguarde a ligação à nuvem.');
 }
 
@@ -4969,7 +5091,12 @@ const CMModelos=(()=>{
    const items=new Map();for(const model of [...(Array.isArray(a[key])?a[key]:[]),...(Array.isArray(b[key])?b[key]:[])])if(model?.id){const anterior=items.get(model.id);if(!anterior || Number(model.revisao || 0)>Number(anterior.revisao || 0) || Number(model.revisao || 0)===Number(anterior.revisao || 0) && Number(model.atualizadoEm || 0)>=Number(anterior.atualizadoEm || 0))items.set(model.id,model);}resultado[key]=[...items.values()];
   }return resultado;
  }
- function locais(prefix){const dados={};try{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(key?.startsWith(prefix)){const lista=JSON.parse(localStorage.getItem(key));if(Array.isArray(lista))dados[key]=lista;}}}catch{}return dados;}
+ // Modelos guardados neste navegador: os antigos no localStorage e os atuais no IndexedDB (cmLegadoLocal).
+ function locais(prefix){
+  const fontes=[];try{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(key?.startsWith(prefix))fontes.push([key,localStorage.getItem(key)]);}}catch{}
+  if(typeof cmLegadoLocal!=='undefined')for(const [key,texto] of cmLegadoLocal)if(key.startsWith(prefix))fontes.push([key,texto]);
+  let dados={};for(const [key,texto] of fontes){try{const lista=JSON.parse(texto);if(Array.isArray(lista))dados=juntar(dados,{[key]:lista});}catch{}}return dados;
+ }
  function listar(campo,key){
   if(typeof carregarModelosNuvem==='function')carregarModelosNuvem(campo);
   const dono=user(),prefix=key.slice(0,key.length-dono.length),dados=juntar(appState?.[campo] || {},locais(admin()?prefix:key)),modelos=[];
@@ -4978,7 +5105,7 @@ const CMModelos=(()=>{
  }
  function guardar(campo,key,modelo){
   const meus=listar(campo,key).filter(m=>m.storageKey===key),anterior=modelo.id?meus.find(m=>m.id===modelo.id):meus.find(m=>m.name===modelo.name && !m.predefinidoConsentimento),salvo={...copiar(modelo),id:anterior?.id || modelo.id || globalThis.crypto?.randomUUID?.() || 'modelo_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2),owner:user(),revisao:Math.max(Number(anterior?.revisao)||0,...bruto(campo,key).filter(m=>m.id===modelo.id).map(m=>Number(m.revisao)||0))+1,atualizadoEm:Date.now()};
-  const lista=meus.filter(m=>m.id!==salvo.id).map(({selectionId,storageKey,...m})=>m);lista.push(salvo,...bruto(campo,key).filter(m=>m.eliminado&&m.id!==salvo.id));appState[campo]={...(appState[campo] || {}),[key]:lista};try{localStorage.setItem(key,JSON.stringify(lista));}catch{}
+  const lista=meus.filter(m=>m.id!==salvo.id).map(({selectionId,storageKey,...m})=>m);lista.push(salvo,...bruto(campo,key).filter(m=>m.eliminado&&m.id!==salvo.id));appState[campo]={...(appState[campo] || {}),[key]:lista};cmGuardarLegado(key,JSON.stringify(lista));
   return {...salvo,selectionId:key+'::'+salvo.id};
  }
  function nome(model){return model.name+(admin() && model.owner!==user()?' — '+model.owner:'');}
@@ -4987,7 +5114,7 @@ const CMModelos=(()=>{
   if(!admin() && !bucket.endsWith(user()))return false;
   const lista=bruto(campo,bucket),alvo=lista.find(m=>m.id===id);if(!alvo)return false;
   const nova=lista.filter(m=>m.id!==id);nova.push({id,eliminado:true,name:alvo.name,owner:alvo.owner,revisao:(Number(alvo.revisao)||0)+1,atualizadoEm:Date.now()});
-  appState[campo]={...(appState[campo] || {}),[bucket]:nova};try{localStorage.setItem(bucket,JSON.stringify(nova));}catch{}
+  appState[campo]={...(appState[campo] || {}),[bucket]:nova};cmGuardarLegado(bucket,JSON.stringify(nova));
   return true;
  }
  return {juntar,listar,guardar,eliminar,nome};
@@ -7658,9 +7785,9 @@ function ligarSincronizacaoNuvem() {
 
 
 function initApp() {
-    const saved = localStorage.getItem('cortaMatoApp');
+    const saved = cmTextoEstadoLocal();
     if(saved) {
-        try { appState = normalizarNomesProvasAdaptadas(JSON.parse(saved)); } catch(e){ console.error(e); cmDadosIlegiveis(saved); }
+        try { appState = normalizarNomesProvasAdaptadas(JSON.parse(saved)); delete appState._copiaLeve; } catch(e){ console.error(e); cmDadosIlegiveis(saved); }
     }
     if(!appState.provas) appState.provas = [];
     aplicarPermissoesSessao();
@@ -12258,7 +12385,7 @@ async function carregarVisuaisSelecionadosCSV(campos=null) {
         certBgPart=prova.certBgPart || null;certBg1=prova.certBg1 || null;certBg2=prova.certBg2 || null;certBg3=prova.certBg3 || null;
         window.certLogosData=prova.certLogosData || [];
         renderLogosPreview();renderCertLogosPreview();gerarDorsaisParaImpressao();
-        try{localStorage.setItem('cortaMatoApp',JSON.stringify(appState));}catch(error){}
+        cmGravarLocal(appState);
     }
 }
 
@@ -12331,8 +12458,15 @@ window.addEventListener('online',retomarDadosGestaoCM);
 setInterval(()=>{if(!document.hidden)enviarFinsPista();},15000);
 window.addEventListener('pageshow',retomarDadosGestaoCM);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)retomarDadosGestaoCM();});
+// Outra janela da gestão gravou: a cópia completa está no IndexedDB (no localStorage fica só a cópia leve).
+let leituraOutraJanelaCM=0;
 window.addEventListener('storage',event=>{
-    if(event.key==='cortaMatoApp' && event.newValue && event.newValue!==JSON.stringify(appState))try{aplicarEstadoRemoto(restaurarVisuaisLocaisCSV(JSON.parse(event.newValue)));carregarVisuaisSelecionadosCSV();}catch(error){}
+    if(event.key!=='cortaMatoApp' || !event.newValue)return;
+    const pedido=++leituraOutraJanelaCM,leve=event.newValue.startsWith(CM_MARCA_LEVE);
+    (leve && cmIDBDisponivel?cmIDBLer(CM_CHAVE_ESTADO).catch(()=>null):Promise.resolve(leve?null:event.newValue)).then(texto=>{
+        if(pedido!==leituraOutraJanelaCM || typeof texto!=='string' || texto===JSON.stringify(appState))return;
+        try{const estado=JSON.parse(texto);delete estado._copiaLeve;cmEstadoLocal.texto=texto;aplicarEstadoRemoto(restaurarVisuaisLocaisCSV(estado));carregarVisuaisSelecionadosCSV();}catch(error){console.error(error);}
+    });
 });
 
 </script><script>window.addEventListener('beforeprint',()=>{
@@ -12726,7 +12860,7 @@ async function carregarModelosNuvem(campo){
  const ref=appState?.[chaveReferenciaModelosCM(campo)],db=dbOnline;if(!ref || !db || appState[campo])return;
  const identidade=campo+'|'+ref.id;if(bibliotecasModelosEmCursoCM.has(identidade))return bibliotecasModelosEmCursoCM.get(identidade);
  const promise=(async()=>{try{
-  const modelos=await lerBibliotecaModelosCM(appState,campo,db);if(appState[chaveReferenciaModelosCM(campo)]?.id!==ref.id)return;appState[campo]=modelos;try{localStorage.setItem('cortaMatoApp',JSON.stringify(appState));}catch{}
+  const modelos=await lerBibliotecaModelosCM(appState,campo,db);if(appState[chaveReferenciaModelosCM(campo)]?.id!==ref.id)return;appState[campo]=modelos;cmGravarLocal(appState);
   window.atualizarModelosDorsal?.();window.atualizarModelosCertificados?.();window.atualizarModelosConsentimento?.();
  }catch(error){for(const id of ['editor-dorsal-status','editor-cert-status','editor-consent-status']){const node=document.getElementById(id);if(node)node.textContent='Não foi possível carregar os modelos guardados. Verifique a ligação e volte a abrir esta área.';}}finally{bibliotecasModelosEmCursoCM.delete(identidade);}})();
  bibliotecasModelosEmCursoCM.set(identidade,promise);return promise;
@@ -13643,7 +13777,7 @@ async function alterarDesclassificacao(dorsal,processo,acao){
     const snapshot=await tx.get(ref);if(!snapshot.exists)throw Error('A prova ainda não foi sincronizada.');const data=snapshot.data(),p=(data.provas || []).find(p=>p.id===prova.id);validarContaPartilha(data,p);
     const out=CMFita.decidir(p,id,acao,{origem:'gestao',operacao});if(out.changed)tx.set(ref,CMConsentimento.estadoNuvem(data));return out.resultado;
    });
-   const atual=(appState.provas || []).find(p=>p.id===prova.id),local=atual?.resultados?.find(item=>CMFita.chave(atual,item)===id);if(acao==='repor'&&resultado.semChegadaAntesDSC&&atual){(atual.anulacoesDSC||={})[id]=true;atual.resultados=(atual.resultados||[]).filter(item=>CMFita.chave(atual,item)!==id);}else if(local){local.desqualificado=resultado.desqualificado;local.fita={...resultado.fita};}try{localStorage.setItem('cortaMatoApp',JSON.stringify(appState));}catch{}
+   const atual=(appState.provas || []).find(p=>p.id===prova.id),local=atual?.resultados?.find(item=>CMFita.chave(atual,item)===id);if(acao==='repor'&&resultado.semChegadaAntesDSC&&atual){(atual.anulacoesDSC||={})[id]=true;atual.resultados=(atual.resultados||[]).filter(item=>CMFita.chave(atual,item)!==id);}else if(local){local.desqualificado=resultado.desqualificado;local.fita={...resultado.fita};}cmGravarLocal(appState);
   }else{resultado=CMFita.decidir(prova,id,acao,{origem:'gestao',operacao}).resultado;saveState(true);}
   if(currentProva?.id===prova.id){atualizarTabelaResultados();atualizarDisplayArranque();}
  }catch(error){alert(error.message || 'Não foi possível alterar a desclassificação.');}
