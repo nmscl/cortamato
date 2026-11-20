@@ -106,6 +106,72 @@ function cmConfirmarRestauro(novo){
  return true;
 }
 
+// ---------- «Aluno» ou «Atleta» ----------
+// A prova escolhe a palavra (Editar prova). Troca-se em todo o texto visível, nos documentos antes de imprimir
+// e nas imagens desenhadas em canvas. Os valores dos campos de formulário e o texto a ser editado não mudam.
+const CMTermo=(()=>{
+ let termo=null,observador=null;
+ const SALTAR=new Set(['SCRIPT','STYLE','TEXTAREA','INPUT','NOSCRIPT','CODE','PRE']);
+ const casar=(orig,novo)=>orig.length>1&&orig===orig.toLocaleUpperCase('pt-PT')?novo.toLocaleUpperCase('pt-PT'):orig[0]!==orig[0].toLocaleLowerCase('pt-PT')?novo[0].toLocaleUpperCase('pt-PT')+novo.slice(1):novo;
+ function trocar(texto){
+  if(!termo||typeof texto!=='string'||!texto)return texto;
+  if(termo==='atleta'){
+   if(!/alun/i.test(texto))return texto;
+   return texto.replace(/\balun[oa]\([oa]\)/gi,m=>casar(m,'atleta')).replace(/\balun([oa])(s?)\b/gi,(m,g,s)=>casar(m,'atleta'+s));
+  }
+  if(!/atleta/i.test(texto))return texto;
+  return texto.replace(/\batleta(s?)\b/gi,(m,s)=>casar(m,'aluno'+s));
+ }
+ const ignorar=el=>SALTAR.has(el.tagName)||el.isContentEditable||!!el.closest?.('[data-cm-termo="nao"]');
+ function trocarNo(no){const v=no.nodeValue,n=trocar(v);if(n!==v)no.nodeValue=n;}
+ function trocarAtributos(el){for(const a of ['placeholder','title','aria-label']){const v=el.getAttribute?.(a);if(v){const n=trocar(v);if(n!==v)el.setAttribute(a,n);}}}
+ function varrer(raiz){
+  if(!termo||!raiz)return;
+  if(raiz.nodeType===3){if(raiz.parentElement&&!ignorar(raiz.parentElement))trocarNo(raiz);return;}
+  if(raiz.nodeType!==1&&raiz.nodeType!==9&&raiz.nodeType!==11)return;
+  if(raiz.nodeType===1&&ignorar(raiz))return;
+  const w=document.createTreeWalker(raiz,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{acceptNode:n=>n.nodeType===1?(ignorar(n)?NodeFilter.FILTER_REJECT:(trocarAtributos(n),NodeFilter.FILTER_SKIP)):NodeFilter.FILTER_ACCEPT});
+  if(raiz.nodeType===1)trocarAtributos(raiz);
+  let no;while((no=w.nextNode()))trocarNo(no);
+ }
+ function ligar(){
+  if(observador||typeof MutationObserver!=='function')return;
+  observador=new MutationObserver(registos=>{
+   if(!termo)return;
+   for(const r of registos){
+    if(r.type==='characterData'){if(r.target.parentElement&&!ignorar(r.target.parentElement))trocarNo(r.target);}
+    else if(r.type==='attributes')trocarAtributos(r.target);
+    else r.addedNodes.forEach(varrer);
+   }
+  });
+  observador.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['placeholder','title','aria-label']});
+ }
+ // Imagens desenhadas em canvas (publicações, quadros): a palavra muda também aí.
+ if(typeof CanvasRenderingContext2D!=='undefined'){
+  const P=CanvasRenderingContext2D.prototype;
+  // cmRecolha/cmTextos: as publicações registam os textos desenhados e trocam os que foram editados à mão.
+  for(const m of ['fillText','strokeText','measureText']){const original=P[m];P[m]=function(t,...resto){
+   if(typeof t==='string'){if(m==='fillText'&&this.cmRecolha&&t.trim())this.cmRecolha.push(t);if(this.cmTextos&&Object.prototype.hasOwnProperty.call(this.cmTextos,t))t=String(this.cmTextos[t]);}
+   return original.call(this,trocar(t),...resto);
+  };}
+ }
+ // Antes de imprimir, o documento é revisto de uma vez (a impressão não espera pelo observador).
+ window.addEventListener('beforeprint',()=>{if(termo){varrer(document.body);document.title=trocar(document.title);}});
+ function definir(novo){
+  novo=novo==='atleta'||novo==='aluno'?novo:null;
+  if(novo===termo)return;
+  termo=novo;document.documentElement.dataset.termo=novo||'';
+  if(!termo)return;
+  ligar();
+  if(document.body)varrer(document.body);
+  document.title=trocar(document.title);
+ }
+ return {definir,trocar,varrer,get termo(){return termo;}};
+})();
+window.CMTermo=CMTermo;
+// Na gestão, a palavra segue a prova escolhida (também quando a prova muda ou chega da nuvem).
+setInterval(()=>{try{CMTermo.definir(typeof currentProva!=='undefined'&&currentProva?currentProva.termo:null);}catch(erro){}},700);
+
 // ---------- Gravação local ----------
 // A cópia completa da gestão (com as imagens dos desenhos) fica no IndexedDB, que tem espaço de sobra.
 // No localStorage (cerca de 5 MB) fica só uma cópia leve, igual à que vai para a nuvem, sem as imagens grandes:
@@ -486,10 +552,10 @@ window.CMDocs=(()=>{
    colunas:[col('dorsal','Dorsal',10,'center',{forte:1}),col('processo','N.º de processo',14),col('nome','Nome do aluno',36,'left',{forte:1}),col('ano','Ano',10),col('turma','Turma',10),col('escalao','Escalão',20),col('presente','Presente',10,'center',{caixa:1,on:false})],
    base(){const b=cabecalho('Participantes por ciclo','{escola}','{secao}');b.data.text='Prova: {data}';b.assinatura.visible=false;b.logos.visible=false;Object.assign(b.corpo,{y:53.6,altura:81.8,size:10.5,destaque:false,textoAntes:'{total} participante(s) com dorsal ativo, sem voluntários.'});return b;}},
   faltas:{nome:'Justificação de faltas',perfil:'declaracao-dt',
-   colunas:[col('dorsal','Dorsal',12,'center',{forte:1}),col('nome','Nome do aluno',44,'left'),col('processo','Processo',16),col('estado','Estado / resultado',28)],
+   colunas:[col('dorsal','Dorsal',12,'center',{forte:1}),col('nome','Nome do aluno',44,'left'),col('processo','Processo',16),col('estado','Presenças',28,'center')],
    base(){const b=cabecalho('{titulo}','Declaração de Participação para Justificação de Faltas','Turma: {secao} | Data: {data}');
     Object.assign(b.titulo,{x:50,y:5,size:20,caixa:'none',alinhamento:'center',maxLarg:90});Object.assign(b.subtitulo,{x:50,y:8,size:14,color:'#111111',caixa:'none',peso:700,alinhamento:'center',maxLarg:90});Object.assign(b.secao,{x:50,y:10.6,size:12,color:'#111111',alinhamento:'center',maxLarg:90});delete b.data;b.linha.y=12.4;b.logos.visible=false;
-    Object.assign(b.corpo,{y:51.9,altura:75.4,size:12,color:'#000000',corCab:'#f1f5f9',corCabTexto:'#000000',corLinhas:'#cbd5e1',zebra:false,destaque:false,textoAntes:'Declara-se para os devidos efeitos que os seguintes alunos da turma {turma} participaram na atividade escolar de Corta-Mato:'});
+    Object.assign(b.corpo,{y:51.9,altura:75.4,size:12,color:'#000000',corCab:'#f1f5f9',corCabTexto:'#000000',corLinhas:'#cbd5e1',zebra:false,destaque:false,textoAntes:'Declara-se, para os devidos efeitos, a presença dos alunos da turma {turma} na atividade escolar de Corta-Mato:'});
     Object.assign(b.assinatura,{y:92.5,size:11,color:'#333333'});return b;}}
  };
  // Na folha deitada, o cabeçalho e o rodapé mantêm os milímetros: as percentagens crescem para não se sobreporem.
@@ -557,7 +623,19 @@ window.CMDocs=(()=>{
   faltas(p,o){
    const pares=new Map();(p.participantes||[]).forEach(a=>{if(a.ano&&a.turma)pares.set(a.ano+'\u0000'+a.turma,[a.ano,a.turma]);});
    const lista=[...pares.values()].filter(([a,t])=>!o.turma||turmaTxt(a,t)===o.turma).sort((x,y)=>ordenarTxt(turmaTxt(...x),turmaTxt(...y))),saida=[];
-   for(const [a,t] of lista){const d=obterDadosTurmaDT(a,t);if(!d||(!d.participaram.length&&!o.turma))continue;const secao=turmaTxt(a,t);saida.push({secao,vars:{turma:secao},linhas:d.participaram.map(x=>({c:{dorsal:x.voluntario?'—':x.dorsal,nome:x.nome,processo:x.processo,estado:x.voluntario?'Serviço voluntário: falta justificada':x.resultado.escalaoNome==='Desistiu'?'Desistência':'Participou / concluiu'}}))});if(o.primeira)break;}
+   // Prova obrigatória para o ciclo da turma: todos os alunos da turma, com quem faltou a vermelho.
+   // Prova não obrigatória: só os alunos que participaram. Em ambos os casos, por ordem alfabética.
+   const obrigatorios=typeof cmCiclosProvaObrigatoria==='function'?cmCiclosProvaObrigatoria(p):[];
+   const porNome=(m,n)=>String(m.x.nome||'').localeCompare(String(n.x.nome||''),'pt-PT',{sensitivity:'base'});
+   for(const [a,t] of lista){
+    const d=obterDadosTurmaDT(a,t);if(!d)continue;
+    const obrigatoria=obrigatorios.includes(cicloDoAluno({ano:a}));
+    const alunos=[...d.participaram.map(x=>({x,presente:true})),...(obrigatoria?d.naoParticiparam.map(x=>({x,presente:false})):[])].sort(porNome);
+    if(!alunos.length&&!o.turma)continue;
+    const secao=turmaTxt(a,t);
+    saida.push({secao,vars:{turma:secao},linhas:alunos.map(({x,presente})=>({c:{dorsal:x.voluntario?'—':(x.dorsal||'—'),nome:x.nome,processo:x.processo,estado:presente?(x.voluntario?'Presente (voluntário)':'Presente'):'Faltou'},cc:{estado:presente?'cmd-presente':'cmd-faltou'}}))});
+    if(o.primeira)break;
+   }
    return saida;
   }
  };
@@ -567,6 +645,7 @@ window.CMDocs=(()=>{
   const nomes=['Ana Ribeiro','Tomás Carvalho','Maria Sousa','Rui Marques','Inês Pinto','Diogo Lima','Beatriz Alves','João Nunes','Marta Simões','Pedro Costa','Sara Gomes','Hugo Santos','Rita Lopes','André Dias'];
   const base=nomes.map((nome,i)=>({cls:['cmd-ouro','cmd-prata','cmd-bronze'][i]||'',c:{pos:(i+1)+'º',dorsal:String(101+i*7),processo:String(12000+i*3),nome,ano:'9',turma:'9º ano A',escalao:'Juvenis Masculinos',tempo:'0'+(9+i%3)+':'+String(10+i*3).padStart(2,'0'),entregue:'',estado:'Participou / concluiu',grupo:'Prova Adaptada',confirmado:'',obs:''}}));
   if(id==='podio')return [{secao:'Juvenis Masculinos',vars:{escalao:'Juvenis Masculinos'},linhas:['9º ano A','9º ano C','8º ano B','8º ano A','7º ano D'].map((turma,i)=>({c:{lugar:(i+1)+'º',turma}})),bloco:()=>h('div',{class:'cmd-podio'},['9º ano A','9º ano C','8º ano B'].map((t,i)=>h('div',{class:'cmd-lugar'+(i+1)},h('b',{},(i+1)+'º'),h('strong',{},t))))}];
+  if(id==='faltas')base.forEach((l,i)=>{const faltou=i%5===3;l.c.estado=faltou?'Faltou':'Presente';l.cc={estado:faltou?'cmd-faltou':'cmd-presente'};});
   return [{secao:id==='classificacoes'?'Juvenis Masculinos':id==='confirmacao'?'Prova Adaptada':id==='ciclos'?'3.º ciclo':'9º ano A',vars:{turma:'9º ano A',escalao:'Juvenis Masculinos'},linhas:base}];
  }
 
@@ -580,7 +659,7 @@ window.CMDocs=(()=>{
  function estiloCorpo(el,c){Object.assign(el.style,{fontFamily:letra(c.font),fontSize:c.size+'pt',color:c.color});for(const [v,k] of [['--cab',c.corCab],['--cab-t',c.corCabTexto],['--zebra',c.corZebra],['--lin',c.corLinhas],['--folga',(c.folga??8)+'px']])el.style.setProperty(v,k);}
  function tabela(cols,linhas,c,inicio=0){
   const soma=cols.reduce((s,k)=>s+(k.larg||10),0)||1,corpo=h('tbody');
-  linhas.forEach((l,i)=>{const tr=h('tr',{class:[c.zebra&&(i+inicio)%2===0?'cmd-z':'',c.destaque?l.cls:''].filter(Boolean).join(' ')});cols.forEach(k=>{const td=h('td',{class:[k.forte?'cmd-f':'',k.mono?'cmd-m':''].filter(Boolean).join(' '),style:'text-align:'+k.al});if(k.caixa)td.append(h('span',{class:'cmd-caixa'}));else td.textContent=String(l.c[k.id]??'');tr.append(td);});corpo.append(tr);});
+  linhas.forEach((l,i)=>{const tr=h('tr',{class:[c.zebra&&(i+inicio)%2===0?'cmd-z':'',c.destaque?l.cls:''].filter(Boolean).join(' ')});cols.forEach(k=>{const td=h('td',{class:[k.forte?'cmd-f':'',k.mono?'cmd-m':''].filter(Boolean).join(' '),style:'text-align:'+k.al});if(k.caixa)td.append(h('span',{class:'cmd-caixa'}));else td.textContent=String(l.c[k.id]??'');if(l.cc?.[k.id])td.classList.add(l.cc[k.id]);tr.append(td);});corpo.append(tr);});
   return h('table',{class:'cmd-tabela'},h('colgroup',{},cols.map(k=>h('col',{style:'width:'+((k.larg||10)/soma*100).toFixed(3)+'%'}))),h('thead',{},h('tr',{},cols.map(k=>h('th',{style:'text-align:'+k.al},k.rotulo)))),corpo);
  }
  // Títulos compridos encolhem para não baterem na data nem na secção, enquanto não forem ajustados à mão.
@@ -1207,7 +1286,7 @@ window.CMDocs=(()=>{
  const siglaRodape=s=>/^AE[A-ZÀ-Ý]{3,}$/.test(s)?'AE'+s.charAt(2)+s.slice(3).toLocaleLowerCase('pt-PT'):s;
  function avaliacaoGuardada(p){try{return JSON.parse(localStorage.getItem('cm:teste:relatorio:v1:'+JSON.stringify([obterUtilizadorAtual(),p.id])))||{};}catch{return {};}}
  function aspetoPub(p){
-  const g=p?.publicacoes||{},dia=interpretarDataAtividade(p?.dataProva);
+  const g=(p&&(appState?.provas||[]).find(x=>String(x.id)===String(p.id))||p)?.publicacoes||{},dia=interpretarDataAtividade(p?.dataProva);
   return {
    sigla:typeof g.sigla==='string'?g.sigla.trim():siglaEscola(p?.nomeEscola),
    cores:{...PUB_CORES,...Object.fromEntries(Object.entries(g.cores||{}).filter(([,v])=>/^#[0-9a-f]{6}$/i.test(v)))},
@@ -1216,11 +1295,12 @@ window.CMDocs=(()=>{
    tituloObrigado:String(g.tituloObrigado||'').trim(),
    parceiros:(Array.isArray(g.parceiros)?g.parceiros:[]).map(s=>String(s).trim()).filter(Boolean),
    logos:Array.isArray(g.logos)?g.logos.filter(Number.isInteger):[],
+   disposicao:['colunas','grelha'].includes(g.disposicaoInfografia)?g.disposicaoInfografia:'vertical',
    dia,ano:dia?.ano||new Date().getFullYear()
   };
  }
  let gravarPubTimer=0;
- function guardarAspetoPub(p,mudar){p.publicacoes={...(p.publicacoes||{}),...mudar};clearTimeout(gravarPubTimer);gravarPubTimer=setTimeout(()=>{try{saveState(true);}catch(e){console.error(e);}},500);}
+ function guardarAspetoPub(p,mudar){const viva=(appState?.provas||[]).find(x=>String(x.id)===String(p.id))||p;viva.publicacoes={...(viva.publicacoes||{}),...mudar};if(p!==viva)p.publicacoes=viva.publicacoes;marcarPendenteCM(viva,'publicacoes');clearTimeout(gravarPubTimer);gravarPubTimer=setTimeout(()=>{try{saveState(true);}catch(e){console.error(e);}},500);}
  const tituloPub=(p,a,av)=>a.titulo||PUB_TITULOS[(av||dadosRelatorio(p).avaliacao).geral]||'Uma edição para recordar';
  const tituloObrigadoPub=a=>a.tituloObrigado||'Um evento desta dimensão faz-se com muitas mãos';
  const rodapePub=(p,a)=>a.rodape||(a.sigla?'Corta-Mato '+siglaRodape(a.sigla.toLocaleUpperCase('pt-PT'))+' '+a.ano:(p.nome||'Corta-Mato Escolar '+a.ano));
@@ -1475,23 +1555,55 @@ window.CMDocs=(()=>{
  async function contextoPub(p){
   const a=aspetoPub(p);await carregarLetraPub(a.letra);
   const imgs=(await Promise.all(logosPub(p,a).map(imagemPub))).filter(Boolean);
-  return {a,pal:paletaPub(a),dd:dadosPub(p),imgs,titulo:tituloPub(p,a),rodape:rodapePub(p,a)};
+  return {a,pal:paletaPub(a),dd:dadosPub(p),imgs,titulo:tituloPub(p,a),rodape:rodapePub(p,a),textos:provaViva(p)?.publicacoes?.textos||{}};
  }
+ // Infografia noutra disposição: as quatro secções lado a lado, em duas colunas ou numa grelha 2×2.
+ // Cada secção é desenhada à parte (com o seu fundo) e depois as secções são juntas; o fundo estica até ao fim da linha ou coluna.
+ function infografiaDispostaPub(C,canvas){
+  const pal=C.pal,recolha=[],ALT=4200;
+  const seccoes=[
+   [pal.fundo,P=>capaPub(P,C,0,{rodape:false})+76],
+   [pal.claro,P=>escaloesPub(P,C,0,{compacto:true})+80],
+   ['#ffffff',P=>quemPub(P,C,0,{escuro:false,compacto:true,cartoes:false})+30],
+   [pal.fundo,P=>{const fim=obrigadoPub(P,C,0,{escuro:true,compacto:true,comParceiros:true});rodapePubCanvas(P,C,fim+70,true,'Até para o ano!');return fim+130;}]
+  ].map(([cor,desenhar])=>{
+   const c=document.createElement('canvas');c.width=1080;c.height=ALT;
+   const x=prepararTextosPub(c.getContext('2d'),C,'infografia');x.fillStyle=cor;x.fillRect(0,0,1080,ALT);
+   const alt=Math.min(ALT,Math.ceil(desenhar(pintorPub(x,C.a))));recolha.push(...(x.cmRecolha||[]));x.cmRecolha=null;x.cmTextos=null;
+   return {c,alt};
+  });
+  const [s1,s2,s3,s4]=seccoes,fatia=(g,s,x,y,h)=>g.drawImage(s.c,0,0,1080,Math.min(ALT,h),x,y,1080,Math.min(ALT,h));
+  if(C.a.disposicao==='colunas'){
+   const H=Math.max(s1.alt+s2.alt,s3.alt+s4.alt);canvas.width=2160;canvas.height=H;const g=canvas.getContext('2d');
+   fatia(g,s1,0,0,s1.alt);fatia(g,s2,0,s1.alt,H-s1.alt);fatia(g,s3,1080,0,s3.alt);fatia(g,s4,1080,s3.alt,H-s3.alt);
+  }else{
+   const H1=Math.max(s1.alt,s2.alt),H2=Math.max(s3.alt,s4.alt);canvas.width=2160;canvas.height=H1+H2;const g=canvas.getContext('2d');
+   fatia(g,s1,0,0,H1);fatia(g,s2,1080,0,H1);fatia(g,s3,0,H1,H2);fatia(g,s4,1080,H1,H2);
+  }
+  canvas.cmTextosRecolhidos=[...new Set(recolha)];
+  return canvas;
+ }
+ // Cada texto desenhado fica registado (para o poder editar) e, se tiver sido editado, é trocado pelo texto escrito.
+ function prepararTextosPub(c,C,tipo){const t=C.textos?.[tipo];c.cmTextos=t&&typeof t==='object'?t:null;c.cmRecolha=[];return c;}
+ function fecharTextosPub(c,canvas){canvas.cmTextosRecolhidos=[...new Set(c.cmRecolha||[])];c.cmRecolha=null;c.cmTextos=null;}
  function desenharPub(tipo,C,canvas){
   const f=PUB[tipo];
+  if(tipo==='infografia'&&C.a.disposicao!=='vertical')return infografiaDispostaPub(C,canvas);
   if(tipo==='infografia'){
    const temp=document.createElement('canvas');temp.width=1080;temp.height=9000;
-   const P=pintorPub(temp.getContext('2d'),C.a),alt=Math.ceil(infografiaPub(P,C));
+   const tctx=prepararTextosPub(temp.getContext('2d'),C,tipo);
+   const P=pintorPub(tctx,C.a),alt=Math.ceil(infografiaPub(P,C));fecharTextosPub(tctx,canvas);
    canvas.width=1080;canvas.height=alt;canvas.getContext('2d').drawImage(temp,0,0);return canvas;
   }
   canvas.width=f.w;canvas.height=f.h;
-  const ctx=canvas.getContext('2d'),P=pintorPub(ctx,C.a),pal=C.pal,escuro=tipo==='capa'||tipo==='quem'||tipo==='story';
+  const ctx=prepararTextosPub(canvas.getContext('2d'),C,tipo),P=pintorPub(ctx,C.a),pal=C.pal,escuro=tipo==='capa'||tipo==='quem'||tipo==='story';
   ctx.fillStyle=escuro?pal.fundo:pal.claro;ctx.fillRect(0,0,f.w,f.h);
   if(tipo==='capa')capaPub(P,C,0);
   else if(tipo==='escaloes')escaloesPub(P,C,0);
   else if(tipo==='quem')quemPub(P,C,0);
   else if(tipo==='obrigado')obrigadoPub(P,C,0);
   else if(tipo==='story')storyPub(P,C);
+  fecharTextosPub(ctx,canvas);
   return canvas;
  }
  const nomeFicheiroPub=(p,tipo)=>String(p.nome||'corta-mato').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-'+PUB[tipo].ficheiro+'.png';
@@ -1531,12 +1643,39 @@ window.CMDocs=(()=>{
 
  /* Relatório da prova: documento sem cartões, justificado por defeito, com todo o texto editável na pré-visualização. */
  // Avaliação, alinhamento e textos editados ficam guardados na prova (e na nuvem, com a prova).
+ // A prova pode ser substituída em memória quando chegam dados da nuvem: lê-se e grava-se sempre na prova atual.
+ const provaViva=p=>p&&(appState?.provas||[]).find(x=>String(x.id)===String(p.id))||p;
+ // Edições do relatório e das publicações feitas há pouco não são desfeitas por dados da nuvem ainda sem elas:
+ // ficam a valer até a nuvem as confirmar (no máximo 2 minutos).
+ const pendentesLocaisCM=new Map();
+ function marcarPendenteCM(p,campo){const v=provaViva(p);if(v)pendentesLocaisCM.set(String(v.id)+'|'+campo,{id:String(v.id),campo,valor:JSON.stringify(v[campo]??null),t:Date.now()});}
+ // aplicarEstadoRemoto está num script mais abaixo: a proteção instala-se quando a página acaba de carregar.
+ (function instalarProtecaoCM(){
+  if(typeof aplicarEstadoRemoto!=='function'){setTimeout(instalarProtecaoCM,150);return;}
+  if(aplicarEstadoRemoto.cmProtegido)return;
+  const aplicarRemotoOriginalCM=aplicarEstadoRemoto;
+  aplicarEstadoRemoto=function(remoto){
+   if(remoto?.provas&&pendentesLocaisCM.size)for(const [chave,pend] of pendentesLocaisCM){
+    const pr=remoto.provas.find(x=>String(x.id)===pend.id);
+    if(!pr||Date.now()-pend.t>120000||JSON.stringify(pr[pend.campo]??null)===pend.valor){pendentesLocaisCM.delete(chave);continue;}
+    pr[pend.campo]=JSON.parse(pend.valor);
+   }
+   return aplicarRemotoOriginalCM.apply(this,arguments);
+  };
+  aplicarEstadoRemoto.cmProtegido=true;
+ })();
  function dadosRelatorio(p){
-  const r=p?.relatorio||{};
+  const r=provaViva(p)?.relatorio||p?.relatorio||{};
   return {avaliacao:{...avaliacaoGuardada(p),...(r.avaliacao||{})},alinhamento:r.alinhamento==='left'?'left':'justify',textos:Object.fromEntries(Object.entries(r.textos&&typeof r.textos==='object'?r.textos:{}).filter(([k])=>k.startsWith('balanco.')))};
  }
  let gravarRelTimer=0;
- function guardarRelatorio(p,mudar){p.relatorio={...(p.relatorio||{}),...mudar};clearTimeout(gravarRelTimer);gravarRelTimer=setTimeout(()=>{try{saveState(true);}catch(e){console.error(e);}},500);}
+ function guardarRelatorio(p,mudar,agora=false){
+  const viva=provaViva(p);viva.relatorio={...(viva.relatorio||{}),...mudar};if(p&&p!==viva)p.relatorio=viva.relatorio;marcarPendenteCM(viva,'relatorio');
+  clearTimeout(gravarRelTimer);const gravar=()=>{gravarRelTimer=0;try{saveState(true);}catch(e){console.error(e);}document.dispatchEvent(new CustomEvent('cm-relatorio-guardado'));};
+  if(agora)gravar();else gravarRelTimer=setTimeout(gravar,500);
+ }
+ // Grava já o que estiver por gravar (botão «Guardar» e ao fechar o editor).
+ function guardarRelatorioAgora(p){clearTimeout(gravarRelTimer);gravarRelTimer=0;guardarRelatorio(p,{},true);}
  const REL_INLINE=new Set(['B','STRONG','EM','I','BR']);
  const REL_TEXTUAIS=new Set(['H1','H2','H3','H4','P','LI','FIGCAPTION','SMALL','TIME','DT','DD','SPAN','STRONG','B','DIV','TD','TH','LABEL']);
  // Cada bloco de texto (sem outros blocos lá dentro) é uma unidade editável.
@@ -1564,7 +1703,8 @@ window.CMDocs=(()=>{
  }
  // O relatório segue o modelo «Relatório da prova». Letra, cor e logótipos são os mesmos dos outros documentos.
  function relatorioModelo(p,v,{editavel=false}={}){
-  const rel=dadosRelatorio(p),f=folhaRelatorio(p,v||rel.avaliacao);
+  const rel=dadosRelatorio(p),f=folhaRelatorio(provaViva(p),v||rel.avaliacao);
+  window.CMTermo?.varrer(f); // «aluno» ou «atleta» já no texto de base, antes das edições à mão
   f.classList.add('cm-rel-doc');if(editavel)f.classList.add('cm-rel-edicao');f.lang='pt-PT';f.dataset.sec='balanco';f.dataset.alinhamento=rel.alinhamento;
   aplicarTextosRelatorio(f,rel.textos,editavel);
   return f;
@@ -1580,14 +1720,14 @@ window.CMDocs=(()=>{
   $('.cm-reled-dlg')?.remove();
   const av={...dadosRelatorio(p).avaliacao};
   const valida=()=>{if(currentProva?.id===provaId&&podeAcederProva(currentProva))return true;dlg.close();alert('A prova ou a sessão mudou. Abra o relatório na prova pretendida.');return false;};
-  function gravarAv(){guardarRelatorio(p,{avaliacao:{...av}});try{localStorage.setItem('cm:teste:relatorio:v1:'+JSON.stringify([obterUtilizadorAtual(),p.id]),JSON.stringify(av));}catch{}agendar();}
+  function gravarAv(){porGuardar();guardarRelatorio(p,{avaliacao:{...av}});try{localStorage.setItem('cm:teste:relatorio:v1:'+JSON.stringify([obterUtilizadorAtual(),p.id]),JSON.stringify(av));}catch{}agendar();}
   const campo=(rot,el)=>h('label',{class:'cmd-campo cm-pub-campo'},h('span',{},rot),el);
   const escolha=(k,opcoes)=>{const s=h('select',{class:'cmd-campo-in'},opcoes.map(([v,t])=>opcao(v,t)));s.value=opcoes.some(([v])=>v===av[k])?av[k]:'';s.addEventListener('change',()=>{av[k]=s.value;gravarAv();});return s;};
   const escrita=k=>{const t=h('textarea',{class:'cmd-campo-in',rows:'2',maxlength:'2000'});t.value=typeof av[k]==='string'?av[k]:'';t.addEventListener('input',()=>{av[k]=t.value;gravarAv();});return t;};
   const escala=[['','Sem avaliação'],...['Excelente','Bom','Satisfatório','A melhorar'].map(t=>[t,t])];
   const alinh=h('select',{class:'cmd-campo-in'},opcao('justify','Justificado'),opcao('left','À esquerda'));
   alinh.value=dadosRelatorio(p).alinhamento;
-  alinh.addEventListener('change',()=>{guardarRelatorio(p,{alinhamento:alinh.value});folha.querySelector('.cm-rel-doc')?.setAttribute('data-alinhamento',alinh.value);});
+  alinh.addEventListener('change',()=>{porGuardar();guardarRelatorio(p,{alinhamento:alinh.value});folha.querySelector('.cm-rel-doc')?.setAttribute('data-alinhamento',alinh.value);});
   const contagem=h('p',{class:'cmp-nota'});
   const repor=h('button',{type:'button',class:'btn btn-secondary btn-sm',on:{click:()=>{if(!Object.keys(dadosRelatorio(p).textos).length)return;if(!confirm('Repor todos os textos automáticos? As alterações feitas ao texto perdem-se.'))return;guardarRelatorio(p,{textos:{}});desenhar();}}},'Repor os textos automáticos');
   const lado=h('aside',{class:'cm-pub-lado'},h('div',{class:'cm-pub-painel'},
@@ -1599,11 +1739,17 @@ window.CMDocs=(()=>{
    campo('Alinhamento',alinh),
    h('div',{class:'cm-pub-bloco'},contagem,repor),
    h('p',{class:'cmp-nota'},'O tipo de letra, a cor e os logótipos são os mesmos dos outros documentos.')));
+  // Estado da gravação: tudo grava sozinho; o botão «Guardar» grava já e confirma.
+  const estadoGravacao=h('span',{class:'cm-reled-estado',role:'status'},'Guardado automaticamente');
+  const aoGuardar=()=>{estadoGravacao.textContent='Guardado às '+new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});estadoGravacao.classList.remove('pendente');};
+  document.addEventListener('cm-relatorio-guardado',aoGuardar);
+  function porGuardar(){estadoGravacao.textContent='Por guardar…';estadoGravacao.classList.add('pendente');}
+  function guardarTodos(){const el=document.activeElement;if(el?.dataset?.campo&&folha.contains(el)){clearTimeout(gravarTimer);gravarTexto(el);}guardarRelatorioAgora(p);}
   const folha=h('div',{class:'cm-reled-folha'}),zoom=h('div',{class:'cm-reled-zoom'},folha);
   const area=h('section',{class:'cm-pub-area cm-reled-area'},h('p',{class:'cmp-nota cm-reled-dica'},'Clique em qualquer texto para o editar, incluindo títulos, números e o quadro. Para tirar um texto do documento, apague-o. As alterações ficam guardadas na prova; se os números mudarem, o texto desse bloco volta ao automático.'),zoom);
   const dlg=h('dialog',{class:'cmd-dlg cm-pub-dlg cm-reled-dlg','aria-labelledby':'cm-reled-titulo'},
    h('div',{class:'cm-pub-cab'},h('div',{},h('h3',{id:'cm-reled-titulo'},'Relatório da prova'),h('p',{class:'cmp-nota'},'Pré-visualização do documento A4, com os números da prova. Todo o texto pode ser editado.')),
-    h('div',{class:'cm-reled-bts'},h('button',{type:'button',class:'btn btn-secondary',on:{click:()=>dlg.close()}},'Fechar'),h('button',{type:'button',class:'btn btn-primary',on:{click:()=>{if(!valida())return;dlg.close();imprimirRelatorio(p);}}},'Imprimir / guardar PDF'))),
+    h('div',{class:'cm-reled-bts'},estadoGravacao,h('button',{type:'button',class:'btn btn-secondary',on:{click:()=>dlg.close()}},'Fechar'),h('button',{type:'button',class:'btn btn-secondary',id:'cm-reled-guardar',on:{click:()=>{if(!valida())return;guardarTodos();}}},'Guardar'),h('button',{type:'button',class:'btn btn-primary',on:{click:()=>{if(!valida())return;guardarTodos();dlg.close();imprimirRelatorio(p);}}},'Imprimir / guardar PDF'))),
    h('div',{class:'cm-pub-corpo'},lado,area));
   let timer=0,gravarTimer=0;
   function agendar(){clearTimeout(timer);timer=setTimeout(desenhar,250);}
@@ -1621,7 +1767,7 @@ window.CMDocs=(()=>{
    if(!html&&el.innerHTML)el.innerHTML='';el.classList.toggle('cm-rel-vazio',!html);
    if(html===el.dataset.htmlOriginal)delete textos[el.dataset.campo];
    else textos[el.dataset.campo]={o:el.dataset.original,t:html};
-   guardarRelatorio(p,{textos});
+   porGuardar();guardarRelatorio(p,{textos});
    const n=Object.keys(textos).length;contagem.textContent=n?n+(n===1?' bloco de texto alterado à mão.':' blocos de texto alterados à mão.'):'Texto automático, sem alterações à mão.';repor.disabled=!n;
   }
   folha.addEventListener('input',ev=>{const el=ev.target.closest?.('[data-campo]');if(!el)return;clearTimeout(gravarTimer);gravarTimer=setTimeout(()=>gravarTexto(el),300);});
@@ -1630,7 +1776,7 @@ window.CMDocs=(()=>{
   folha.addEventListener('paste',ev=>{if(!ev.target.closest?.('[data-campo]'))return;ev.preventDefault();document.execCommand('insertText',false,ev.clipboardData?.getData('text/plain')||'');});
   function ajustarZoom(){const w=area.clientWidth-36;if(w>0)zoom.style.zoom=String(Math.min(1.15,Math.max(.45,w/794)));}
   const observador=typeof ResizeObserver==='function'?new ResizeObserver(ajustarZoom):null;observador?.observe(area);
-  dlg.addEventListener('close',()=>{clearTimeout(timer);clearTimeout(gravarTimer);observador?.disconnect();setTimeout(()=>dlg.remove(),0);atualizarHub();},{once:true});
+  dlg.addEventListener('close',()=>{clearTimeout(timer);const el=document.activeElement;if(el?.dataset?.campo&&folha.contains(el)){clearTimeout(gravarTimer);gravarTexto(el);}clearTimeout(gravarTimer);guardarRelatorioAgora(p);document.removeEventListener('cm-relatorio-guardado',aoGuardar);observador?.disconnect();setTimeout(()=>dlg.remove(),0);atualizarHub();},{once:true});
   document.body.append(dlg);dlg.showModal();desenhar();
  }
  // Cartão «Relatório da prova», no mesmo formato dos outros documentos.
@@ -1675,31 +1821,64 @@ window.CMDocs=(()=>{
   const estado=h('p',{class:'cmp-nota cm-pub-estado',role:'status'});
   const valida=()=>{if(currentProva?.id===provaId&&podeAcederProva(currentProva))return true;dlg.close();alert('A prova ou a sessão mudou. Abra as publicações na prova pretendida.');return false;};
   const tudo=h('button',{type:'button',class:'btn btn-primary',on:{click:async()=>{if(!valida())return;tudo.disabled=true;for(const [tipo,f] of figuras){if(PUB[tipo].grupo!==aba)continue;await descarregarCanvasPub(f.canvas,nomeFicheiroPub(p,tipo));await new Promise(r=>setTimeout(r,450));}tudo.disabled=false;}}},'Descarregar todas');
+  // Disposição da infografia (só aparece no separador «Infografia»).
+  const dispSel=h('select',{class:'cmd-campo-in','aria-label':'Disposição da infografia'},opcao('vertical','Vertical (uma coluna)'),opcao('colunas','Em duas colunas'),opcao('grelha','Em grelha (2 × 2)'));
+  dispSel.value=aspetoPub(p).disposicao;
+  dispSel.addEventListener('change',()=>{guardarAspetoPub(p,{disposicaoInfografia:dispSel.value});const f=figuras.get('infografia');if(f)f.textos.dataset.sig='';agendar();});
+  const dispCampo=h('label',{class:'cm-pub-disp',hidden:true},h('span',{},'Disposição'),dispSel);
   const dlg=h('dialog',{class:'cmd-dlg cm-pub-dlg','aria-labelledby':titulo.id},
    h('div',{class:'cm-pub-cab'},h('div',{},titulo,sub),h('div',{class:'cm-pub-bts'},btCriar,btPers,h('button',{type:'button',class:'btn btn-secondary',on:{click:()=>dlg.close()}},'Fechar'))),
    h('div',{class:'cm-pub-corpo'},
     h('aside',{class:'cm-pub-lado'},painelAspetoPub(p,()=>agendar())),
-    h('section',{class:'cm-pub-area'},h('div',{class:'cm-pub-barra'},abas,tudo),estado,grelha)));
+    h('section',{class:'cm-pub-area'},h('div',{class:'cm-pub-barra'},abas,dispCampo,tudo),estado,grelha)));
   for(const [id,rot] of [['carrossel','Carrossel 4:5'],['story','Story 9:16'],['infografia','Infografia']]){
    const b=h('button',{type:'button',role:'tab',class:'cm-pub-aba','aria-selected':String(id===aba),on:{click:()=>{aba=id;[...abas.children].forEach(x=>x.setAttribute('aria-selected',String(x===b)));desenhar();}}},rot);abas.append(b);
   }
   function modo(pers){
    dlg.classList.toggle('cm-pub-so-criar',!pers);btPers.hidden=pers;btCriar.hidden=!pers;
    titulo.textContent=pers?'Personalizar publicações':'Criar publicações';
-   sub.textContent=pers?'Título, cores, letra, logótipos e parceiros: o que mudar aqui fica guardado na prova e aparece logo nas imagens.':'Imagens feitas com os números desta prova, prontas a descarregar e a partilhar.';
+   sub.textContent=pers?'Título, cores, letra, logótipos e parceiros à esquerda; por baixo de cada imagem, «Editar os textos desta imagem» deixa mudar qualquer texto. Fica tudo guardado na prova.':'Imagens feitas com os números desta prova, prontas a descarregar e a partilhar.';
   }
   modo(personalizar);
+  // Todos os textos de cada imagem podem ser editados: cada campo mostra o texto original ou o escrito à mão.
+  const textosEditados=()=>provaViva(p)?.publicacoes?.textos||{};
+  function listaTextosPub(tipo,f){
+   const originais=f.canvas.cmTextosRecolhidos||[],sig=JSON.stringify(originais);
+   if(f.textos.dataset.sig===sig)return;
+   f.textos.dataset.sig=sig;const editados=textosEditados()[tipo]||{};
+   f.textos.replaceChildren(...(originais.length?originais.map(original=>{
+    const campo=h('input',{type:'text',class:'cmd-campo-in','aria-label':'Texto: '+original,maxlength:'400'});
+    campo.value=Object.prototype.hasOwnProperty.call(editados,original)?editados[original]:original;
+    campo.addEventListener('input',()=>gravarTextoPub(tipo,original,campo.value));
+    return campo;
+   }):[h('p',{class:'cmp-nota'},'Esta imagem não tem textos.')]));
+  }
+  function gravarTextoPub(tipo,original,valor){
+   const todos={...textosEditados()},deste={...(todos[tipo]||{})};
+   if(valor===original)delete deste[original];else deste[original]=valor;
+   if(Object.keys(deste).length)todos[tipo]=deste;else delete todos[tipo];
+   guardarAspetoPub(p,{textos:todos});agendar();
+  }
+  function reporTextosPub(tipo){
+   const todos={...textosEditados()};if(!todos[tipo])return;delete todos[tipo];guardarAspetoPub(p,{textos:todos});
+   const f=figuras.get(tipo);if(f)f.textos.dataset.sig='';agendar();
+  }
   function agendar(){clearTimeout(timer);timer=setTimeout(desenhar,220);}
   async function desenhar(){
    if(!valida())return;
    const n=++pedido;estado.textContent='A preparar as imagens…';
    const C=await contextoPub(p);if(n!==pedido)return;
    const tipos=Object.keys(PUB).filter(t=>PUB[t].grupo===aba);
-   grelha.dataset.aba=aba;
+   grelha.dataset.aba=aba;grelha.dataset.disp=aspetoPub(p).disposicao;dispCampo.hidden=aba!=='infografia';
    grelha.replaceChildren(...tipos.map(tipo=>{
     let f=figuras.get(tipo);
-    if(!f){const canvas=h('canvas',{class:'cm-pub-canvas',role:'img'});const bt=h('button',{type:'button',class:'btn btn-secondary btn-sm',on:{click:()=>descarregarCanvasPub(canvas,nomeFicheiroPub(p,tipo))}},'Descarregar PNG');f={canvas,el:h('figure',{class:'cm-pub-fig'},canvas,h('figcaption',{},h('span',{},PUB[tipo].nome),bt))};figuras.set(tipo,f);}
-    desenharPub(tipo,C,f.canvas);f.canvas.setAttribute('aria-label',PUB[tipo].nome+' · '+C.titulo);
+    if(!f){
+     const canvas=h('canvas',{class:'cm-pub-canvas',role:'img'});const bt=h('button',{type:'button',class:'btn btn-secondary btn-sm',on:{click:()=>descarregarCanvasPub(canvas,nomeFicheiroPub(p,tipo))}},'Descarregar PNG');
+     const lista=h('div',{class:'cm-pub-textos-lista'});
+     const caixa=h('details',{class:'cm-pub-textos'},h('summary',{},'Editar os textos desta imagem'),lista,h('button',{type:'button',class:'btn btn-secondary btn-sm',on:{click:()=>reporTextosPub(tipo)}},'Repor os textos desta imagem'));
+     f={canvas,textos:lista,el:h('figure',{class:'cm-pub-fig'},canvas,h('figcaption',{},h('span',{},PUB[tipo].nome),bt),caixa)};figuras.set(tipo,f);
+    }
+    desenharPub(tipo,C,f.canvas);listaTextosPub(tipo,f);f.canvas.setAttribute('aria-label',PUB[tipo].nome+' · '+C.titulo);
     f.el.querySelector('figcaption span').textContent=PUB[tipo].nome+' · '+f.canvas.width+'×'+f.canvas.height;
     return f.el;
    }));
@@ -1796,7 +1975,7 @@ window.CMDocs=(()=>{
    h('div',{class:'cmd-grupo-t'},h('h2',{},'Redes sociais'),h('p',{class:'cmp-nota'},'Imagens com os números da prova, prontas a publicar. Personalize as cores, os logótipos e os parceiros.')),
    h('div',{class:'cmd-grelha'},h('article',{class:'box cmd-cartao cm-pub-cartao'},
     h('div',{class:'cm-pub-mini','aria-hidden':'true'},h('small',{},'Corta-Mato'),h('b',{},'879'),h('small',{},'atletas em prova')),
-    h('div',{class:'cmd-info'},h('h3',{},'Publicações para as redes sociais'),h('p',{class:'cmd-desc'},'Carrossel de 4 imagens (4:5), story (9:16) e infografia vertical, em PNG.'),estPub),
+    h('div',{class:'cmd-info'},h('h3',{},'Publicações para as redes sociais'),h('p',{class:'cmd-desc'},'Carrossel de 4 imagens (4:5), story (9:16) e infografia (vertical, em duas colunas ou em grelha), em PNG.'),estPub),
     h('div',{class:'cmd-acoes'},btPub,perPub)))));
   $('.cmp-cab',sec).after(hub);
  }
@@ -6646,6 +6825,11 @@ const CMTextoConsentimento=(()=>{
                         <label>Escola / Agrupamento:</label>
                         <input type="text" id="modal-nome-escola" placeholder="Ex: Agrupamento de Escolas...">
                     </div>
+                    <div class="input-group" style="margin-bottom: 12px;" data-cm-termo="nao">
+                        <label for="modal-termo">Chamar aos participantes:</label>
+                        <select id="modal-termo"><option value="aluno">Aluno</option><option value="atleta">Atleta</option></select>
+                        <small style="display:block;margin-top:4px;color:#64748b">A palavra escolhida passa a ser usada em toda a plataforma e em todos os documentos desta prova.</small>
+                    </div>
                     <div class="input-group" style="margin-bottom: 12px;">
                         <label>Data do Evento:</label>
                         <input type="date" id="modal-data-prova">
@@ -7985,6 +8169,7 @@ function abrirModalNovaProva() {
     document.getElementById('modal-titulo-dorsal').value = "";
     document.getElementById('modal-nome-escola').value = "";
     document.getElementById('modal-data-prova').value = "";
+    if (document.getElementById('modal-termo')) document.getElementById('modal-termo').value = 'aluno';
 
     // O ano letivo começa em setembro: de janeiro a agosto ainda decorre o ano iniciado no ano anterior.
     let hojeModal = new Date();
@@ -8022,7 +8207,8 @@ function abrirModalEditarProva() {
     document.getElementById('modal-titulo-dorsal').value = currentProva.tituloDorsal || "";
     document.getElementById('modal-nome-escola').value = currentProva.nomeEscola || "";
     document.getElementById('modal-data-prova').value = currentProva.dataProva || "";
-    
+    if (document.getElementById('modal-termo')) document.getElementById('modal-termo').value = currentProva.termo === 'atleta' ? 'atleta' : 'aluno';
+
     if (document.getElementById('modal-ano-letivo')) {
         document.getElementById('modal-ano-letivo').value = currentProva.anoLetivo || "";
     }
@@ -8176,7 +8362,8 @@ async function guardarModalProva() {
     let dorsalInicial = document.getElementById('modal-dorsal-inicial') ? parseInt(document.getElementById('modal-dorsal-inicial').value) || 1 : 1;
     let digitosDorsal = document.getElementById('modal-digitos-dorsal') ? parseInt(document.getElementById('modal-digitos-dorsal').value) || 3 : 3;
     let tipoCodigo = document.getElementById('modal-tipo-codigo') ? document.getElementById('modal-tipo-codigo').value : 'qr';
-    
+    let termo = document.getElementById('modal-termo')?.value === 'atleta' ? 'atleta' : 'aluno';
+
     for (const esc of ESCALOES_BASE) {
         for (const gen of ['M','F']) {
             const input = document.getElementById('distancia_' + esc.id + '_' + gen);
@@ -8204,6 +8391,7 @@ async function guardarModalProva() {
             dorsalInicial: dorsalInicial,
             digitosDorsal: digitosDorsal,
             tipoCodigo: tipoCodigo,
+            termo: termo,
             escaloesConfig: configEsc,
             participantes: [],
             resultados: []
@@ -8223,7 +8411,9 @@ async function guardarModalProva() {
         currentProva.dorsalInicial = dorsalInicial;
         currentProva.digitosDorsal = digitosDorsal;
         currentProva.tipoCodigo = tipoCodigo;
-        
+        currentProva.termo = termo;
+        window.CMTermo?.definir(termo);
+
         if (!currentProva.escaloesConfig) currentProva.escaloesConfig = {};
         Object.keys(configEsc).forEach(key => {
             if (currentProva.escaloesConfig[key]) {
@@ -14740,7 +14930,12 @@ window.CMPercurso=(()=>{
 .cm-reled-folha .cm-rel-editavel{border-radius:3px;outline:1px dashed transparent;outline-offset:2px;cursor:text;transition:outline-color .15s,background-color .15s}
 .cm-reled-folha .cm-rel-editavel:hover{outline-color:#93a4c3}
 .cm-reled-folha .cm-rel-editavel:focus{outline:2px solid #2f6fe4;background:#eef4ff}
-.cm-reled-bts{display:flex;flex-wrap:wrap;gap:8px}
+.cm-reled-bts{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cm-reled-estado{font-size:13px;font-weight:600;color:#15803d}
+/* Justificação de faltas: coluna «Presenças», com quem faltou a vermelho. */
+html body #print-area .cmd-tabela td.cmd-faltou,html body .cmd-tabela tbody td.cmd-faltou{color:#c62828!important;-webkit-text-fill-color:#c62828!important;font-weight:800!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.cmd-tabela td.cmd-presente{font-weight:600}
+.cm-reled-estado.pendente{color:#b45309}
 .cm-reled-t{margin:6px 0 -4px;font-size:14px;font-weight:800;color:var(--c-ink,#0f1c2e)}
 .cm-reled-dlg .cm-pub-corpo{grid-template-columns:minmax(280px,360px) minmax(0,1fr)}
 /* Miniatura no cartão */
@@ -14759,7 +14954,13 @@ window.CMPercurso=(()=>{
 .cm-pub-lado{min-height:0;overflow:auto;padding:16px 20px 24px;border-right:1px solid var(--c-line,#e2e7ee)}
 /* «Criar publicações» mostra só as imagens; «Personalizar» junta o painel ao lado. */
 .cm-pub-dlg.cm-pub-so-criar .cm-pub-corpo{grid-template-columns:minmax(0,1fr)}
-.cm-pub-dlg.cm-pub-so-criar .cm-pub-lado{display:none}
+.cm-pub-dlg.cm-pub-so-criar .cm-pub-lado,.cm-pub-dlg.cm-pub-so-criar .cm-pub-textos{display:none}
+/* Funciona nos temas claro e escuro: fundo translúcido e texto com a cor da área. */
+.cm-pub-textos{margin-top:2px;padding:8px 10px;border:1px solid rgba(148,163,184,.4);border-radius:10px;background:rgba(148,163,184,.1);color:inherit}
+.cm-pub-textos summary{cursor:pointer;font-size:13px;font-weight:700;color:inherit}
+.cm-pub-textos[open] summary{margin-bottom:8px}
+.cm-pub-textos-lista{display:grid;gap:6px;max-height:340px;overflow:auto;margin-bottom:8px}
+.cm-pub-textos-lista .cmd-campo-in{min-height:36px;padding:6px 10px;font-size:13px}
 .cm-pub-bts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
 .cm-pub-area{min-height:0;overflow:auto;padding:14px 20px 24px;background:var(--c-soft,#f3f5f8)}
 .cm-pub-painel{display:grid;gap:14px}
@@ -14784,6 +14985,10 @@ html[data-tema="escuro"] .cm-pub-dlg .cm-pub-aba[aria-selected="true"]{backgroun
 .cm-pub-grelha{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:16px;align-items:start}
 .cm-pub-grelha[data-aba="story"]{grid-template-columns:minmax(0,340px)}
 .cm-pub-grelha[data-aba="infografia"]{grid-template-columns:minmax(0,420px)}
+.cm-pub-grelha[data-aba="infografia"]:is([data-disp="colunas"],[data-disp="grelha"]){grid-template-columns:minmax(0,780px)}
+.cm-pub-disp{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.cm-pub-disp[hidden]{display:none}
+.cm-pub-disp .cmd-campo-in{min-height:40px;width:auto}
 .cm-pub-fig{display:grid;gap:8px;margin:0}
 .cm-pub-canvas{display:block;width:100%;height:auto;border-radius:10px;box-shadow:0 6px 18px rgba(15,28,46,.18);background:#fff}
 .cm-pub-fig figcaption{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--c-text,#34425a)}
